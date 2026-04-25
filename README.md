@@ -27,7 +27,7 @@ Default targeting lives in `src/config.js`:
 export const TARGETING = {
   primaryWeapon: {
     strategy: "nearest",
-    enemyTypes: ["drone", "bruiser"],
+    enemyTypes: ["drone", "bruiser", "splitter", "shard"],
     maxRange: 1200,
     firingAngleDegrees: 8,
   },
@@ -69,6 +69,12 @@ particles: true,
 - Equipment is split into weapon, hull, and utility slots. Each slot has several sidegrades with visible stat tradeoffs, and invalid saved equipment IDs fall back to the default loadout.
 - Scrap is awarded after runs from survival time, kills, wave reached, and salvage bonuses.
 - The PPO Lab runs a lightweight policy-gradient trainer against `GameSimulation` and tracks score, damage, kills, survival, and death rate per batch.
+
+## Run Mechanics
+
+- Weapon upgrades now include piercing Phase Lance bolts and Arc Conductor chain lightning.
+- Enemy waves can include splitters that burst into shards, plus swift and armored elite affixes at later waves.
+- Drops include XP, repair, scrap, shield, overdrive, magnet burst, and rare cache pickups.
 
 ## Economy Balance Script
 

@@ -7,8 +7,10 @@ import { calculateRunScrap, defaultMetaProgress, PERMANENT_UPGRADES, upgradeCost
 const DEFAULT_SEEDS = [101, 202, 303, 404, 505, 606, 707, 808];
 const UPGRADE_PRIORITY = [
   "splitter-warheads",
+  "phase-lance",
   "orbital-drone",
   "gravity-well",
+  "arc-conductor",
   "quantum-rails",
   "ion-lens",
   "plasma-overclock",
