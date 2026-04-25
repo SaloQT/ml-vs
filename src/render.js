@@ -26,6 +26,18 @@ export class Renderer {
     this.lastElapsed = 0;
     this.seenEffects = new Set();
     this.shake = 0;
+    this.hudState = {
+      hpDisplay: 1,
+      xpDisplay: 0,
+      shieldDisplay: 0,
+      lastHp: null,
+      lastXp: 0,
+      lastLevel: 1,
+      damagePulse: 0,
+      xpFlash: 0,
+      levelFlash: 0,
+      gameOverIn: 0,
+    };
     this.resize();
     window.addEventListener("resize", () => this.resize());
   }
@@ -666,64 +678,660 @@ export class Renderer {
   drawHud(snapshot, player) {
     if (!player) return;
     const ctx = this.ctx;
-    const pad = this.viewport.width < 520 ? 14 : 20;
-    const hudWidth = Math.min(356, this.viewport.width - pad * 2);
-    const barWidth = Math.max(150, hudWidth - 142);
-    const hpAmount = player.hp / player.stats.maxHp;
-    const xpAmount = player.xp / player.nextLevelXp;
+    const dt = clamp(snapshot.elapsed - (this.hudState.lastFrameElapsed ?? snapshot.elapsed), 0, 1 / 12);
+    this.hudState.lastFrameElapsed = snapshot.elapsed;
+
+    const maxHp = Math.max(1, player.stats.maxHp);
+    const hpAmount = clamp(player.hp / maxHp, 0, 1);
+    const shieldAmount = clamp((player.shield ?? 0) / maxHp, 0, 1);
+    const xpAmount = clamp(player.xp / Math.max(1, player.nextLevelXp), 0, 1);
+
+    // Animation state
+    const hs = this.hudState;
+    if (hs.lastHp === null) hs.lastHp = player.hp;
+    if (player.hp < hs.lastHp - 0.5) hs.damagePulse = 1;
+    if (player.level > hs.lastLevel) {
+      hs.levelFlash = 1;
+      hs.xpFlash = 1;
+    } else if (player.xp > hs.lastXp + 0.01) {
+      hs.xpFlash = Math.max(hs.xpFlash, 0.6);
+    }
+    hs.lastHp = player.hp;
+    hs.lastXp = player.xp;
+    hs.lastLevel = player.level;
+
+    const ease = 1 - Math.pow(0.0009, Math.max(dt, 0.001));
+    hs.hpDisplay += (hpAmount - hs.hpDisplay) * ease;
+    hs.shieldDisplay += (shieldAmount - hs.shieldDisplay) * ease;
+    hs.xpDisplay += (xpAmount - hs.xpDisplay) * ease;
+    hs.damagePulse = Math.max(0, hs.damagePulse - dt * 2.4);
+    hs.xpFlash = Math.max(0, hs.xpFlash - dt * 1.6);
+    hs.levelFlash = Math.max(0, hs.levelFlash - dt * 1.1);
+
     const dps = this.currentDps(snapshot.elapsed);
     this.peakDps = Math.max(this.peakDps * 0.998, dps, 50);
+
+    const vw = this.viewport.width;
+    const vh = this.viewport.height;
+    const pad = vw < 520 ? 10 : 18;
+    const t = snapshot.elapsed;
+
     ctx.save();
-    this.drawPanel(pad, pad, hudWidth, 126);
-    this.drawUiIcon("hull", pad + 25, pad + 31, 34, 34);
-    this.drawUiIcon("xp", pad + 25, pad + 78, 30, 30);
-    this.drawLabeledBar(pad + 52, pad + 22, barWidth, 14, hpAmount, "#ff4f73", "Hull", `${Math.ceil(player.hp)} / ${player.stats.maxHp}`);
-    this.drawLabeledBar(pad + 52, pad + 68, barWidth, 10, xpAmount, "#57d8ff", "Core", `Lv ${player.level}`);
-    ctx.font = "800 12px Inter, system-ui, sans-serif";
-    ctx.fillStyle = "#edf7ff";
-    ctx.fillText("DPS", pad + 52, pad + 109);
-    ctx.fillStyle = "#91a8bd";
-    ctx.textAlign = "right";
-    ctx.fillText(formatDamage(dps), pad + 52 + barWidth, pad + 109);
+
+    // === HP BLOCK (top-left, edge-anchored, no panel) ===
+    const hpW = Math.max(220, Math.min(460, vw * 0.34));
+    const hpH = 22;
+    const hpX = pad;
+    const hpY = pad + 18; // leave room for label above
+    this.drawUiIcon("hull", hpX + 18, hpY + hpH / 2 + 2, 38, 38);
+    const hpColor = hpHealthColor(hs.hpDisplay);
+    const damageWobble = hs.damagePulse > 0 ? Math.sin(t * 50) * hs.damagePulse * 1.6 : 0;
+    const hpBarX = hpX + 44;
+    const hpBarW = hpW - 44;
+    ctx.save();
+    ctx.translate(damageWobble, 0);
+    this.drawStatBar(hpBarX, hpY, hpBarW, hpH, hs.hpDisplay, hpColor, {
+      label: "HULL INTEGRITY",
+      value: `${Math.ceil(player.hp)} / ${Math.round(maxHp)}`,
+      glow: 0.6 + hs.damagePulse * 0.5,
+      pulse: hs.damagePulse,
+      shield: hs.shieldDisplay,
+      shieldColor: "#7df3ff",
+      ticks: 5,
+      time: t,
+    });
+    ctx.restore();
+
+    // DPS readout below HP (compact, no panel)
+    const dpsY = hpY + hpH + 18;
+    ctx.font = "800 10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(237, 247, 255, 0.7)";
     ctx.textAlign = "left";
-    drawBar(ctx, pad + 52, pad + 115, barWidth, 5, dps / this.peakDps, "#ffc857");
+    ctx.fillText("DPS", hpBarX, dpsY);
+    ctx.fillStyle = "#ffc857";
+    ctx.textAlign = "right";
+    ctx.fillText(formatDamage(dps), hpBarX + hpBarW, dpsY);
+    ctx.textAlign = "left";
+    drawBar(ctx, hpBarX, dpsY + 4, hpBarW, 3, dps / this.peakDps, "#ff5b79");
 
-    this.drawPanel(pad, pad + 136, hudWidth, 48, 0.48);
-    this.drawUiIcon("wave", pad + 28, pad + 160, 28, 28);
-    this.drawUiIcon("timer", pad + 178, pad + 160, 27, 27);
-    ctx.font = "800 15px Inter, system-ui, sans-serif";
-    ctx.fillStyle = "#edf7ff";
-    ctx.fillText(`Wave ${snapshot.wave}`, pad + 52, pad + 166);
-    ctx.fillText(formatTime(snapshot.elapsed), pad + 202, pad + 166);
-
-    if (this.viewport.width >= 760) {
-      const target = snapshot.targeting?.primaryWeapon;
-      this.drawPanel(this.viewport.width - 268, pad, 248, 58, 0.44);
-      this.drawUiIcon("target", this.viewport.width - 240, pad + 29, 30, 30);
-      ctx.font = "800 13px Inter, system-ui, sans-serif";
-      ctx.fillStyle = "#edf7ff";
-      ctx.fillText(target ? target.strategy.toUpperCase() : "AUTO TARGET", this.viewport.width - 216, pad + 26);
-      ctx.font = "700 12px Inter, system-ui, sans-serif";
-      ctx.fillStyle = "#91a8bd";
-      ctx.fillText(`${snapshot.enemies.length} contacts`, this.viewport.width - 216, pad + 44);
+    // === STAT TILES — spread along top edge, center-anchored ===
+    if (vw >= 720) {
+      const tileH = 64;
+      const tileW = Math.min(120, (vw - hpW - 320 - pad * 4) / 3);
+      if (tileW >= 80) {
+        const tileGap = 8;
+        const totalW = tileW * 3 + tileGap * 2;
+        const tileStart = (vw - totalW) / 2;
+        const tileY = pad;
+        this.drawStatTile(tileStart, tileY, tileW, tileH, "wave", "WAVE", String(snapshot.wave), "#b86cff");
+        this.drawStatTile(tileStart + tileW + tileGap, tileY, tileW, tileH, "timer", "TIME", formatTime(snapshot.elapsed), "#64d9ff");
+        this.drawStatTile(tileStart + (tileW + tileGap) * 2, tileY, tileW, tileH, null, "KILLS", String(player.kills ?? 0), "#ff5b79");
+      }
+    } else {
+      // narrow viewport — stats below HP
+      const tileY = dpsY + 14;
+      const tileH = 52;
+      const tileW = (hpW - 12) / 3;
+      this.drawStatTile(hpX, tileY, tileW, tileH, "wave", "WAVE", String(snapshot.wave), "#b86cff");
+      this.drawStatTile(hpX + (tileW + 6), tileY, tileW, tileH, "timer", "TIME", formatTime(snapshot.elapsed), "#64d9ff");
+      this.drawStatTile(hpX + (tileW + 6) * 2, tileY, tileW, tileH, null, "KILLS", String(player.kills ?? 0), "#ff5b79");
     }
+
+    // === TARGETING / THREAT (top-right) ===
+    if (vw >= 760) {
+      const target = snapshot.targeting?.primaryWeapon;
+      const tw = 304;
+      const th = 86;
+      const tx = vw - tw - pad;
+      const ty = pad;
+      this.drawNeonPanel(tx, ty, tw, th, "#ff5b79", 0.5);
+      // Pulsing accent left edge
+      const pulse = 0.6 + 0.4 * Math.sin(t * 3.4);
+      ctx.save();
+      ctx.fillStyle = `rgba(255, 91, 121, ${0.5 + pulse * 0.4})`;
+      ctx.fillRect(tx + 6, ty + 12, 3, th - 24);
+      ctx.shadowColor = "rgba(255, 91, 121, 0.85)";
+      ctx.shadowBlur = 10;
+      ctx.fillRect(tx + 6, ty + 12, 3, th - 24);
+      ctx.restore();
+
+      this.drawUiIcon("target", tx + 38, ty + 30, 36, 36);
+      ctx.font = "900 9px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255, 178, 192, 0.7)";
+      ctx.textAlign = "left";
+      ctx.fillText("TARGETING DOCTRINE", tx + 64, ty + 18);
+      ctx.font = "900 16px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#ffeef1";
+      ctx.fillText(target ? target.strategy.toUpperCase() : "AUTO TARGET", tx + 64, ty + 38);
+
+      const contacts = snapshot.enemies.length;
+      ctx.font = "700 10px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255, 178, 192, 0.85)";
+      ctx.fillText("THREAT", tx + 14, ty + 62);
+      // Threat dots — 8 dots, larger
+      const dotsX = tx + 64;
+      const dotY = ty + 60;
+      const threatLevel = clamp(Math.floor(contacts / 6), 0, 8);
+      for (let i = 0; i < 8; i += 1) {
+        const lit = i < threatLevel;
+        ctx.fillStyle = lit
+          ? `rgba(255, 91, 121, ${0.7 + Math.sin(t * 4 + i) * 0.25})`
+          : "rgba(255, 91, 121, 0.16)";
+        ctx.beginPath();
+        ctx.arc(dotsX + i * 14, dotY, 4, 0, Math.PI * 2);
+        ctx.fill();
+        if (lit) {
+          ctx.save();
+          ctx.shadowColor = "#ff5b79";
+          ctx.shadowBlur = 8;
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+      ctx.font = "900 18px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#ffeef1";
+      ctx.textAlign = "right";
+      ctx.shadowColor = "rgba(255, 91, 121, 0.7)";
+      ctx.shadowBlur = 6;
+      ctx.fillText(`${contacts}`, tx + tw - 14, ty + 42);
+      ctx.shadowBlur = 0;
+      ctx.font = "700 9px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255, 178, 192, 0.7)";
+      ctx.fillText("CONTACTS", tx + tw - 14, ty + 56);
+      ctx.textAlign = "left";
+    }
+
+    // === XP BAR — full-width hero element, bottom edge ===
+    const xpH = 22;
+    const xpMargin = 0; // bleed to edge
+    const xpY = vh - xpH - xpMargin - 4;
+    const xpX = 0;
+    const xpW = vw;
+
+    // Backdrop strip behind bar — pure flat with subtle gradient & top hairline
+    ctx.save();
+    const bdH = xpH + 28;
+    const bdY = vh - bdH;
+    const bdGrad = ctx.createLinearGradient(0, bdY, 0, vh);
+    bdGrad.addColorStop(0, "rgba(4, 9, 20, 0)");
+    bdGrad.addColorStop(0.5, "rgba(4, 9, 20, 0.65)");
+    bdGrad.addColorStop(1, "rgba(4, 9, 20, 0.92)");
+    ctx.fillStyle = bdGrad;
+    ctx.fillRect(0, bdY, vw, bdH);
+    // Top hairline
+    ctx.fillStyle = "rgba(255, 210, 74, 0.35)";
+    ctx.fillRect(0, bdY, vw, 1);
+    ctx.fillStyle = "rgba(255, 210, 74, 0.08)";
+    ctx.fillRect(0, bdY + 1, vw, 1);
+    ctx.restore();
+
+    // Floor track for XP — flat, no rounded corners (true edge-bleed)
+    ctx.save();
+    ctx.fillStyle = "rgba(8, 14, 26, 0.92)";
+    ctx.fillRect(xpX, xpY, xpW, xpH);
+
+    // Fill
+    const xpFillW = xpW * clamp(hs.xpDisplay, 0, 1);
+    if (xpFillW > 0) {
+      const fg = ctx.createLinearGradient(0, xpY, 0, xpY + xpH);
+      fg.addColorStop(0, "#fff2a8");
+      fg.addColorStop(0.45, "#ffd24a");
+      fg.addColorStop(1, "#ff9a1f");
+      // Glow under fill
+      ctx.save();
+      ctx.shadowColor = "#ffd24a";
+      ctx.shadowBlur = 18 + hs.xpFlash * 22;
+      ctx.fillStyle = fg;
+      ctx.fillRect(xpX, xpY, xpFillW, xpH);
+      ctx.restore();
+      ctx.fillStyle = fg;
+      ctx.fillRect(xpX, xpY, xpFillW, xpH);
+
+      // Top sheen highlight (1/3 of bar)
+      const sheenG = ctx.createLinearGradient(0, xpY, 0, xpY + xpH * 0.55);
+      sheenG.addColorStop(0, "rgba(255, 255, 255, 0.4)");
+      sheenG.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = sheenG;
+      ctx.fillRect(xpX, xpY, xpFillW, xpH * 0.55);
+
+      // Animated sheen sweep
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(xpX, xpY, xpFillW, xpH);
+      ctx.clip();
+      const sweep = ((t * 0.18) % 1) * (xpFillW + 200) - 100;
+      const sg = ctx.createLinearGradient(sweep - 80, 0, sweep + 80, 0);
+      sg.addColorStop(0, "rgba(255, 255, 255, 0)");
+      sg.addColorStop(0.5, "rgba(255, 255, 255, 0.32)");
+      sg.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = sg;
+      ctx.fillRect(sweep - 80, xpY, 160, xpH);
+      ctx.restore();
+
+      // Leading-edge flash on XP gain
+      if (hs.xpFlash > 0.02 && xpFillW < xpW) {
+        ctx.save();
+        ctx.globalAlpha = hs.xpFlash;
+        const eg = ctx.createRadialGradient(xpFillW, xpY + xpH / 2, 0, xpFillW, xpY + xpH / 2, 36);
+        eg.addColorStop(0, "rgba(255, 255, 220, 0.85)");
+        eg.addColorStop(1, "rgba(255, 210, 74, 0)");
+        ctx.fillStyle = eg;
+        ctx.fillRect(xpFillW - 36, xpY - 8, 72, xpH + 16);
+        ctx.restore();
+      }
+    }
+
+    // Tick marks — kinetic segments
+    const tickCount = vw < 700 ? 12 : vw < 1100 ? 20 : 28;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.45)";
+    ctx.lineWidth = 1;
+    for (let i = 1; i < tickCount; i += 1) {
+      const tickX = (xpW * i) / tickCount;
+      ctx.beginPath();
+      ctx.moveTo(tickX, xpY + 3);
+      ctx.lineTo(tickX, xpY + xpH - 3);
+      ctx.stroke();
+    }
+
+    // Top + bottom hairlines on bar
+    ctx.fillStyle = "rgba(255, 240, 180, 0.55)";
+    ctx.fillRect(xpX, xpY, xpW, 1);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    ctx.fillRect(xpX, xpY + xpH - 1, xpW, 1);
+    ctx.restore();
+
+    // Level-up wave: bright gaussian sweep along the entire bar
+    if (hs.levelFlash > 0.02) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(xpX, xpY - 2, xpW, xpH + 4);
+      ctx.clip();
+      const waveT = 1 - hs.levelFlash; // 0 -> 1 over the flash duration
+      const waveX = waveT * (xpW + 240) - 120;
+      const wg = ctx.createLinearGradient(waveX - 160, 0, waveX + 160, 0);
+      wg.addColorStop(0, "rgba(255, 255, 255, 0)");
+      wg.addColorStop(0.5, `rgba(255, 255, 255, ${0.85 * Math.min(1, hs.levelFlash * 1.6)})`);
+      wg.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = wg;
+      ctx.fillRect(waveX - 160, xpY - 2, 320, xpH + 4);
+      ctx.restore();
+    }
+
+    // LEVEL chip — bottom-left, overlapping the XP bar's left edge
+    const chipH = 30;
+    const chipW = 84;
+    const chipX = pad;
+    const chipY = xpY + (xpH - chipH) / 2;
+    this.drawHexChip(chipX, chipY, chipW, chipH, "#ffc857", `LV ${player.level}`, hs.levelFlash);
+
+    // EXPERIENCE label + value — bottom-right
+    ctx.save();
+    ctx.font = "900 9px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(255, 230, 160, 0.7)";
+    ctx.textAlign = "right";
+    ctx.fillText("EXPERIENCE", vw - pad, xpY - 8);
+    ctx.font = "900 14px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffeed1";
+    ctx.shadowColor = "rgba(255, 210, 74, 0.7)";
+    ctx.shadowBlur = 8;
+    ctx.fillText(`${Math.floor(player.xp)} / ${player.nextLevelXp}`, vw - pad, xpY + xpH + 16);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // Vignette pulse on heavy damage
+    if (hs.damagePulse > 0.05) {
+      const a = hs.damagePulse * 0.32;
+      const grad = ctx.createRadialGradient(
+        vw / 2,
+        vh / 2,
+        Math.min(vw, vh) * 0.35,
+        vw / 2,
+        vh / 2,
+        Math.max(vw, vh) * 0.7,
+      );
+      grad.addColorStop(0, "rgba(255, 60, 90, 0)");
+      grad.addColorStop(1, `rgba(255, 60, 90, ${a})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, vw, vh);
+    }
+
+    // Level-up top-edge band (companion to the bottom wave)
+    if (hs.levelFlash > 0.02) {
+      ctx.save();
+      ctx.globalAlpha = hs.levelFlash * 0.55;
+      const lg = ctx.createLinearGradient(0, 0, vw, 0);
+      lg.addColorStop(0, "rgba(255, 210, 74, 0)");
+      lg.addColorStop(0.5, "rgba(255, 210, 74, 0.5)");
+      lg.addColorStop(1, "rgba(255, 210, 74, 0)");
+      ctx.fillStyle = lg;
+      ctx.fillRect(0, 0, vw, 4);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  drawNeonPanel(x, y, width, height, accent = "#64d9ff", alpha = 0.58, cut = 12) {
+    const ctx = this.ctx;
+    ctx.save();
+    // Outer glow
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = `rgba(4, 9, 20, ${alpha})`;
+    chamferedRectPath(ctx, x, y, width, height, cut);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // Inner gradient overlay
+    const grad = ctx.createLinearGradient(x, y, x, y + height);
+    grad.addColorStop(0, "rgba(255, 255, 255, 0.06)");
+    grad.addColorStop(1, "rgba(0, 0, 0, 0.18)");
+    ctx.fillStyle = grad;
+    chamferedRectPath(ctx, x, y, width, height, cut);
+    ctx.fill();
+    // Outline
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = hexToRgba(accent, 0.55);
+    chamferedRectPath(ctx, x + 0.5, y + 0.5, width - 1, height - 1, cut);
+    ctx.stroke();
+    // Inner subtle stroke
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+    chamferedRectPath(ctx, x + 4, y + 4, width - 8, height - 8, cut - 4);
+    ctx.stroke();
+    // Corner ticks
+    ctx.strokeStyle = hexToRgba(accent, 0.85);
+    ctx.lineWidth = 1.4;
+    const tick = 8;
+    ctx.beginPath();
+    ctx.moveTo(x + cut + 4, y); ctx.lineTo(x + cut + 4 + tick, y);
+    ctx.moveTo(x + width - cut - 4, y); ctx.lineTo(x + width - cut - 4 - tick, y);
+    ctx.moveTo(x + cut + 4, y + height); ctx.lineTo(x + cut + 4 + tick, y + height);
+    ctx.moveTo(x + width - cut - 4, y + height); ctx.lineTo(x + width - cut - 4 - tick, y + height);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawHexChip(x, y, width, height, color, text, flash = 0) {
+    const ctx = this.ctx;
+    ctx.save();
+    const slant = 6;
+    ctx.beginPath();
+    ctx.moveTo(x + slant, y);
+    ctx.lineTo(x + width, y);
+    ctx.lineTo(x + width - slant, y + height);
+    ctx.lineTo(x, y + height);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(x, y, x, y + height);
+    grad.addColorStop(0, hexToRgba(color, 0.95));
+    grad.addColorStop(1, hexToRgba(color, 0.55));
+    ctx.fillStyle = grad;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8 + flash * 14;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(20, 12, 0, 0.55)";
+    ctx.stroke();
+    ctx.font = "900 11px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#1a1206";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x + width / 2 - slant / 2, y + height / 2 + 0.5);
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
+    ctx.restore();
+  }
+
+  drawStatBar(x, y, width, height, amount, color, opts = {}) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = "800 10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(237, 247, 255, 0.92)";
+    ctx.textAlign = "left";
+    ctx.fillText(opts.label ?? "", x, y - 4);
+    ctx.fillStyle = "rgba(180, 198, 218, 0.85)";
+    ctx.textAlign = "right";
+    ctx.fillText(opts.value ?? "", x + width, y - 4);
+    ctx.textAlign = "left";
+
+    const r = height / 2;
+    // Track
+    ctx.fillStyle = "rgba(8, 14, 26, 0.85)";
+    roundRectPath(ctx, x, y, width, height, r);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.07)";
+    ctx.lineWidth = 1;
+    roundRectPath(ctx, x + 0.5, y + 0.5, width - 1, height - 1, r);
+    ctx.stroke();
+
+    const fillW = width * clamp(amount, 0, 1);
+
+    // Glow under fill
+    if (fillW > 1 && opts.glow) {
+      ctx.save();
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10 + (opts.glow ?? 0) * 14;
+      ctx.fillStyle = color;
+      roundRectPath(ctx, x, y, fillW, height, r);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Gradient fill
+    if (fillW > 1) {
+      let fillStyle = color;
+      if (opts.gradient) {
+        const g = ctx.createLinearGradient(x, y, x, y + height);
+        g.addColorStop(0, opts.gradient[0]);
+        g.addColorStop(0.5, opts.gradient[1]);
+        g.addColorStop(1, opts.gradient[2]);
+        fillStyle = g;
+      } else {
+        const g = ctx.createLinearGradient(x, y, x, y + height);
+        g.addColorStop(0, lighten(color, 0.35));
+        g.addColorStop(1, color);
+        fillStyle = g;
+      }
+      ctx.fillStyle = fillStyle;
+      roundRectPath(ctx, x, y, fillW, height, r);
+      ctx.fill();
+
+      // Top sheen highlight
+      ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+      roundRectPath(ctx, x + 1, y + 1, fillW - 2, Math.max(1, height * 0.32), r);
+      ctx.fill();
+
+      // Animated sheen sweep (yellow XP bar especially)
+      if (opts.sheen) {
+        const t = opts.time ?? 0;
+        const sweep = ((t * 0.32) % 1) * (fillW + 60) - 30;
+        ctx.save();
+        roundRectPath(ctx, x, y, fillW, height, r);
+        ctx.clip();
+        const sg = ctx.createLinearGradient(x + sweep - 30, 0, x + sweep + 30, 0);
+        sg.addColorStop(0, "rgba(255, 255, 255, 0)");
+        sg.addColorStop(0.5, "rgba(255, 255, 255, 0.45)");
+        sg.addColorStop(1, "rgba(255, 255, 255, 0)");
+        ctx.fillStyle = sg;
+        ctx.fillRect(x + sweep - 30, y, 60, height);
+        ctx.restore();
+      }
+    }
+
+    // Shield overlay
+    if (opts.shield && opts.shield > 0.001) {
+      const shieldW = Math.min(width, fillW + width * opts.shield);
+      const start = Math.max(0, fillW - 1);
+      ctx.save();
+      roundRectPath(ctx, x, y, width, height, r);
+      ctx.clip();
+      const sg = ctx.createLinearGradient(x, y, x, y + height);
+      sg.addColorStop(0, hexToRgba(opts.shieldColor ?? "#7df3ff", 0.85));
+      sg.addColorStop(1, hexToRgba(opts.shieldColor ?? "#7df3ff", 0.55));
+      ctx.fillStyle = sg;
+      ctx.fillRect(x + start, y, shieldW - start, height);
+      // Diagonal shield hatching
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = "rgba(255,255,255,0.6)";
+      ctx.lineWidth = 1;
+      const t = opts.time ?? 0;
+      for (let sx = -height; sx < shieldW + height; sx += 6) {
+        const ox = sx + ((t * 18) % 6);
+        ctx.beginPath();
+        ctx.moveTo(x + start + ox, y);
+        ctx.lineTo(x + start + ox - height, y + height);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Tick marks
+    if (opts.ticks && opts.ticks > 1) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < opts.ticks; i += 1) {
+        const tx = x + (width * i) / opts.ticks;
+        ctx.beginPath();
+        ctx.moveTo(tx, y + 2);
+        ctx.lineTo(tx, y + height - 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Outline
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = hexToRgba(color, 0.55);
+    roundRectPath(ctx, x + 0.5, y + 0.5, width - 1, height - 1, r);
+    ctx.stroke();
+
+    // XP flash burst at the leading edge
+    if (opts.yellow && opts.flash > 0.02 && fillW > 2) {
+      ctx.save();
+      ctx.globalAlpha = opts.flash;
+      const fg = ctx.createRadialGradient(x + fillW, y + height / 2, 0, x + fillW, y + height / 2, 24);
+      fg.addColorStop(0, "rgba(255, 255, 220, 0.9)");
+      fg.addColorStop(1, "rgba(255, 210, 74, 0)");
+      ctx.fillStyle = fg;
+      ctx.beginPath();
+      ctx.arc(x + fillW, y + height / 2, 24, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  drawStatTile(x, y, width, height, icon, label, value, accent) {
+    const ctx = this.ctx;
+    this.drawNeonPanel(x, y, width, height, accent, 0.5, 8);
+    ctx.save();
+    // Accent top stripe — flat-with-glow modern feel
+    ctx.fillStyle = hexToRgba(accent, 0.85);
+    ctx.fillRect(x + 10, y + 6, Math.max(20, width * 0.28), 2);
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 8;
+    ctx.fillRect(x + 10, y + 6, Math.max(20, width * 0.28), 2);
+    ctx.shadowBlur = 0;
+
+    if (icon) this.drawUiIcon(icon, x + width - 22, y + 22, 20, 20);
+    const tx = x + 12;
+    const tall = height >= 60;
+    ctx.font = "900 9px Inter, system-ui, sans-serif";
+    ctx.fillStyle = hexToRgba(accent, 0.9);
+    ctx.textAlign = "left";
+    ctx.fillText(label, tx, y + 22);
+    ctx.font = tall ? "900 26px Inter, system-ui, sans-serif" : "900 20px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#edf7ff";
+    ctx.shadowColor = hexToRgba(accent, 0.75);
+    ctx.shadowBlur = 8;
+    ctx.fillText(value, tx, y + height - 12);
+    ctx.shadowBlur = 0;
     ctx.restore();
   }
 
   drawGameOver(snapshot) {
     const ctx = this.ctx;
+    const w = this.viewport.width;
+    const h = this.viewport.height;
+    this.hudState.gameOverIn = Math.min(1, this.hudState.gameOverIn + 0.04);
+    const t = this.hudState.gameOverIn;
+    const elapsed = this.lastElapsed;
+
     ctx.save();
-    ctx.fillStyle = "rgba(2, 5, 12, 0.72)";
-    ctx.fillRect(0, 0, this.viewport.width, this.viewport.height);
-    this.drawPanel(this.viewport.width / 2 - 230, this.viewport.height / 2 - 110, 460, 190, 0.78);
-    this.drawUiIcon("warning", this.viewport.width / 2, this.viewport.height / 2 - 78, 58, 50);
-    ctx.fillStyle = "#edf7ff";
+
+    // Vignette + scanlines
+    const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7);
+    grad.addColorStop(0, `rgba(40, 0, 12, ${0.5 * t})`);
+    grad.addColorStop(1, `rgba(2, 4, 10, ${0.92 * t})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.globalAlpha = 0.18 * t;
+    ctx.fillStyle = "#ff5b79";
+    for (let y = 0; y < h; y += 4) {
+      ctx.fillRect(0, y, w, 1);
+    }
+    ctx.globalAlpha = 1;
+
+    // Glitch title (offset chromatic copies)
     ctx.textAlign = "center";
-    ctx.font = "800 48px Inter, system-ui, sans-serif";
-    ctx.fillText("Signal Lost", this.viewport.width / 2, this.viewport.height / 2 - 8);
-    ctx.fillStyle = "#91a8bd";
-    ctx.font = "700 18px Inter, system-ui, sans-serif";
-    ctx.fillText(`Survived ${formatTime(snapshot.elapsed)} through wave ${snapshot.wave}`, this.viewport.width / 2, this.viewport.height / 2 + 38);
+    const title = "SIGNAL LOST";
+    const titleY = h / 2 - 30;
+    const jitter = (Math.sin(elapsed * 12) * 2 + Math.sin(elapsed * 33) * 1.4) * t;
+    ctx.font = "900 64px Inter, system-ui, sans-serif";
+    ctx.fillStyle = `rgba(100, 217, 255, ${0.7 * t})`;
+    ctx.fillText(title, w / 2 - 4 + jitter, titleY);
+    ctx.fillStyle = `rgba(255, 91, 121, ${0.7 * t})`;
+    ctx.fillText(title, w / 2 + 4 - jitter, titleY);
+    ctx.fillStyle = `rgba(255, 248, 240, ${t})`;
+    ctx.shadowColor = "rgba(255, 91, 121, 0.8)";
+    ctx.shadowBlur = 24;
+    ctx.fillText(title, w / 2, titleY);
+    ctx.shadowBlur = 0;
+
+    // Subtitle bar
+    ctx.font = "800 12px Inter, system-ui, sans-serif";
+    ctx.fillStyle = `rgba(255, 200, 87, ${t})`;
+    ctx.fillText("// MISSION TERMINATED //", w / 2, titleY + 26);
+
+    // Stats panel
+    const pw = 480;
+    const ph = 110;
+    const px = w / 2 - pw / 2;
+    const py = titleY + 50;
+    ctx.globalAlpha = t;
+    this.drawNeonPanel(px, py, pw, ph, "#ff5b79", 0.78, 14);
+
+    const cells = [
+      { label: "SURVIVED", value: formatTime(elapsed), color: "#64d9ff" },
+      { label: "WAVE REACHED", value: String(snapshot.wave), color: "#b86cff" },
+      { label: "FINAL LEVEL", value: String(snapshot.players?.[0]?.level ?? 1), color: "#ffd24a" },
+    ];
+    const cellW = pw / cells.length;
+    cells.forEach((cell, i) => {
+      const cx = px + i * cellW + cellW / 2;
+      ctx.font = "800 11px Inter, system-ui, sans-serif";
+      ctx.fillStyle = hexToRgba(cell.color, 0.85);
+      ctx.fillText(cell.label, cx, py + 36);
+      ctx.font = "900 30px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#edf7ff";
+      ctx.shadowColor = hexToRgba(cell.color, 0.7);
+      ctx.shadowBlur = 12;
+      ctx.fillText(cell.value, cx, py + 76);
+      ctx.shadowBlur = 0;
+      if (i < cells.length - 1) {
+        ctx.strokeStyle = "rgba(255, 91, 121, 0.3)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px + (i + 1) * cellW, py + 18);
+        ctx.lineTo(px + (i + 1) * cellW, py + ph - 18);
+        ctx.stroke();
+      }
+    });
+    ctx.globalAlpha = 1;
+
     ctx.restore();
   }
 
@@ -1098,6 +1706,54 @@ function collectionEffectStyle(type) {
     },
   };
   return styles[type] ?? styles.overdrive;
+}
+
+function roundRectPath(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  roundRect(ctx, x, y, width, height, radius);
+}
+
+function chamferedRectPath(ctx, x, y, width, height, cut) {
+  const c = Math.min(cut, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + c, y);
+  ctx.lineTo(x + width - c, y);
+  ctx.lineTo(x + width, y + c);
+  ctx.lineTo(x + width, y + height - c);
+  ctx.lineTo(x + width - c, y + height);
+  ctx.lineTo(x + c, y + height);
+  ctx.lineTo(x, y + height - c);
+  ctx.lineTo(x, y + c);
+  ctx.closePath();
+}
+
+function hexToRgba(hex, alpha = 1) {
+  if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function lighten(hex, amount = 0.2) {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  let r = parseInt(full.slice(0, 2), 16);
+  let g = parseInt(full.slice(2, 4), 16);
+  let b = parseInt(full.slice(4, 6), 16);
+  r = Math.min(255, Math.round(r + (255 - r) * amount));
+  g = Math.min(255, Math.round(g + (255 - g) * amount));
+  b = Math.min(255, Math.round(b + (255 - b) * amount));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function hpHealthColor(amount) {
+  // green -> yellow -> red as HP depletes
+  if (amount > 0.6) return "#4be08a";
+  if (amount > 0.3) return "#ffc857";
+  return "#ff4f73";
 }
 
 function roundRect(ctx, x, y, width, height, radius) {
