@@ -30,6 +30,10 @@ export function createPlayer(id, x = 0, y = 0) {
       projectileRadius: 5,
       projectileTtl: 1.4,
       projectiles: 1,
+      projectilePierce: 0,
+      chainArcs: 0,
+      chainRange: 170,
+      chainDamageMultiplier: 0.45,
       pickupRadius: PLAYER_BASE.pickupRadius,
       drones: 0,
       gravityWell: 0,
@@ -65,7 +69,7 @@ export function createEnemy(id, type, x, y, wave) {
   };
 }
 
-export function createProjectile(id, ownerId, x, y, vx, vy, damage, radius = 5, ttl = 1.4) {
+export function createProjectile(id, ownerId, x, y, vx, vy, damage, radius = 5, ttl = 1.4, weapon = {}) {
   return {
     id,
     kind: "projectile",
@@ -77,6 +81,11 @@ export function createProjectile(id, ownerId, x, y, vx, vy, damage, radius = 5, 
     radius,
     damage,
     ttl,
+    pierce: weapon.pierce ?? 0,
+    chainArcs: weapon.chainArcs ?? 0,
+    chainRange: weapon.chainRange ?? 0,
+    chainDamageMultiplier: weapon.chainDamageMultiplier ?? 0,
+    hitEnemyIds: [],
   };
 }
 

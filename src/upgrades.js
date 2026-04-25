@@ -32,6 +32,10 @@ export const UPGRADE_POOL = [
     player.stats.projectiles += 1;
     player.stats.fireRate *= 0.94;
   }),
+  statUpgrade("phase-lance", "Phase Lance", "rare", "Bolts pierce one additional enemy.", 2, (player) => {
+    player.stats.projectilePierce += 1;
+    player.stats.projectileTtl *= 1.08;
+  }),
   statUpgrade("orbital-drone", "Orbital Drone", "rare", "Adds a rotating drone that burns nearby enemies.", 4, (player) => {
     player.stats.drones += 1;
   }),
@@ -53,6 +57,10 @@ export const UPGRADE_POOL = [
   statUpgrade("quantum-rails", "Quantum Rails", "epic", "Bolts travel 18% faster and hit 28% harder.", 2, (player) => {
     player.stats.projectileSpeed *= 1.18;
     player.stats.damage *= 1.28;
+  }),
+  statUpgrade("arc-conductor", "Arc Conductor", "epic", "Projectile hits chain lightning to a nearby enemy.", 3, (player) => {
+    player.stats.chainArcs += 1;
+    player.stats.chainDamageMultiplier += 0.12;
   }),
   statUpgrade("twin-core-reactor", "Twin-Core Reactor", "epic", "Fire 24% faster, but max hull drops by 12.", 2, (player) => {
     player.stats.fireRate *= 1.24;
