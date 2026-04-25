@@ -124,8 +124,7 @@ export class Renderer {
       this.drawGlow(projectile.x, projectile.y, 46, "rgba(100, 225, 255, 0.42)");
     }
     for (const enemy of snapshot.enemies) {
-      const color = enemy.type === "bruiser" ? "rgba(184, 108, 255, 0.22)" : "rgba(255, 75, 111, 0.22)";
-      this.drawGlow(enemy.x, enemy.y, enemy.type === "bruiser" ? 76 : 48, color);
+      this.drawGlow(enemy.x, enemy.y, enemyGlowRadius(enemy), enemyGlowColor(enemy));
     }
     for (const player of snapshot.players) {
       this.drawGlow(player.x, player.y, 88, "rgba(78, 214, 255, 0.26)");
@@ -214,20 +213,28 @@ export class Renderer {
     const pulse = 1 + Math.sin(elapsed * 4.5 + numericId(enemy.id)) * (enemy.type === "bruiser" ? 0.025 : 0.05);
     const hitFlash = clamp(enemy.hitFlash / 0.12, 0, 1);
     const hitScale = 1 + hitFlash * 0.16;
-    const width = (enemy.type === "bruiser" ? 62 : 42) * pulse;
-    const height = (enemy.type === "bruiser" ? 68 : 37) * pulse;
+    const width = enemyDrawWidth(enemy) * pulse;
+    const height = enemyDrawHeight(enemy) * pulse;
     const rotation =
       (enemy.type === "bruiser" ? Math.sin(elapsed * 1.8 + numericId(enemy.id)) * 0.04 : elapsed * 0.7) +
       hitFlash * 0.1;
     if (!this.drawSprite(spriteName, enemy.x, enemy.y + bob, width * hitScale, height * hitScale, rotation)) {
-      ctx.fillStyle = enemy.type === "bruiser" ? "#ab5cff" : "#ff5b79";
+      ctx.fillStyle = enemyFillColor(enemy);
       ctx.beginPath();
-      ctx.arc(enemy.x, enemy.y + bob, enemy.radius, 0, Math.PI * 2);
+      if (enemy.type === "splitter") {
+        ctx.moveTo(enemy.x, enemy.y + bob - enemy.radius);
+        ctx.lineTo(enemy.x + enemy.radius, enemy.y + bob + enemy.radius * 0.65);
+        ctx.lineTo(enemy.x - enemy.radius, enemy.y + bob + enemy.radius * 0.65);
+        ctx.closePath();
+      } else {
+        ctx.arc(enemy.x, enemy.y + bob, enemy.radius, 0, Math.PI * 2);
+      }
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.24)";
       ctx.lineWidth = 2;
       ctx.stroke();
     }
+    if (enemy.eliteAffix) this.drawEliteRing(enemy, bob, elapsed);
     if (hitFlash > 0) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
@@ -240,6 +247,20 @@ export class Renderer {
     }
     ctx.fillStyle = "#1df2a4";
     ctx.fillRect(enemy.x - enemy.radius, enemy.y + bob - enemy.radius - 10, enemy.radius * 2 * health, 3);
+  }
+
+  drawEliteRing(enemy, bob, elapsed) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = enemy.eliteAffix === "armored" ? "rgba(140, 245, 255, 0.82)" : "rgba(255, 211, 92, 0.86)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash(enemy.eliteAffix === "swift" ? [8, 7] : []);
+    ctx.lineDashOffset = -elapsed * 24;
+    ctx.beginPath();
+    ctx.arc(enemy.x, enemy.y + bob, enemy.radius + 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawProjectile(projectile, elapsed) {
@@ -786,6 +807,43 @@ function numericId(id) {
   return String(id)
     .split("")
     .reduce((total, char) => total + char.charCodeAt(0), 0);
+}
+
+function enemyDrawWidth(enemy) {
+  if (enemy.type === "bruiser") return 62;
+  if (enemy.type === "splitter") return 48;
+  if (enemy.type === "shard") return 28;
+  return 42;
+}
+
+function enemyDrawHeight(enemy) {
+  if (enemy.type === "bruiser") return 68;
+  if (enemy.type === "splitter") return 46;
+  if (enemy.type === "shard") return 25;
+  return 37;
+}
+
+function enemyFillColor(enemy) {
+  if (enemy.type === "bruiser") return "#ab5cff";
+  if (enemy.type === "splitter") return "#ff9a3d";
+  if (enemy.type === "shard") return "#ffcf57";
+  return "#ff5b79";
+}
+
+function enemyGlowColor(enemy) {
+  if (enemy.eliteAffix === "armored") return "rgba(140, 245, 255, 0.28)";
+  if (enemy.eliteAffix === "swift") return "rgba(255, 211, 92, 0.28)";
+  if (enemy.type === "bruiser") return "rgba(184, 108, 255, 0.22)";
+  if (enemy.type === "splitter" || enemy.type === "shard") return "rgba(255, 154, 61, 0.24)";
+  return "rgba(255, 75, 111, 0.22)";
+}
+
+function enemyGlowRadius(enemy) {
+  if (enemy.eliteAffix) return enemy.type === "bruiser" ? 92 : 66;
+  if (enemy.type === "bruiser") return 76;
+  if (enemy.type === "splitter") return 58;
+  if (enemy.type === "shard") return 36;
+  return 48;
 }
 
 function normalizeVector(x, y) {

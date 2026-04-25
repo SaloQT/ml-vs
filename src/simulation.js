@@ -200,17 +200,28 @@ export class GameSimulation {
       const target = this.rng.pick(alivePlayers);
       const angle = this.rng.range(0, Math.PI * 2);
       const distance = this.rng.range(650, 900);
-      const type = this.rng.next() < Math.min(0.1 + this.wave * 0.015, 0.35) ? "bruiser" : "drone";
+      const typeRoll = this.rng.next();
+      const splitterChance = this.wave >= 2 ? Math.min(0.04 + this.wave * 0.008, 0.14) : 0;
+      const bruiserChance = Math.min(0.1 + this.wave * 0.015, 0.35);
+      const type = typeRoll < splitterChance ? "splitter" : typeRoll < splitterChance + bruiserChance ? "bruiser" : "drone";
+      const eliteAffix = this.rollEliteAffix();
       const enemy = createEnemy(
         this.entityId(),
         type,
         target.x + Math.cos(angle) * distance,
         target.y + Math.sin(angle) * distance,
         this.wave,
+        { eliteAffix },
       );
       this.enemies.set(enemy.id, enemy);
     }
     this.spawnTimer = Math.max(0.36, 1.7 - this.wave * 0.08);
+  }
+
+  rollEliteAffix() {
+    const eliteChance = this.wave >= 3 ? Math.min(0.035 + this.wave * 0.007, 0.12) : 0;
+    if (this.rng.next() >= eliteChance) return null;
+    return this.rng.next() < 0.5 ? "swift" : "armored";
   }
 
   updateEnemies(dt) {
@@ -218,7 +229,7 @@ export class GameSimulation {
     for (const enemy of this.enemies.values()) {
       const target = this.nearestPlayer(enemy, alivePlayers);
       if (!target) continue;
-      const direction = normalize(target.x - enemy.x, target.y - enemy.y);
+      const direction = this.enemyMoveDirection(enemy, target, dt);
       enemy.x += direction.x * enemy.speed * dt;
       enemy.y += direction.y * enemy.speed * dt;
       enemy.x += enemy.hitVx * dt;
@@ -237,6 +248,16 @@ export class GameSimulation {
         enemy.y -= direction.y * 20;
       }
     }
+  }
+
+  enemyMoveDirection(enemy, target, dt) {
+    const direction = normalize(target.x - enemy.x, target.y - enemy.y);
+    if (enemy.eliteAffix !== "swift") return direction;
+
+    enemy.strafePhase = (enemy.strafePhase ?? 0) + dt * 5.2;
+    const numericId = Number.parseInt(enemy.id.replace(/\D/g, ""), 10) || 0;
+    const weave = Math.sin(enemy.strafePhase + numericId * 0.37) * 0.42;
+    return normalize(direction.x - direction.y * weave, direction.y + direction.x * weave);
   }
 
   updateProjectiles(dt) {
@@ -317,7 +338,7 @@ export class GameSimulation {
     const sourceDirection = source ? normalize(source.vx ?? enemy.x - source.x, source.vy ?? enemy.y - source.y) : { x: 0, y: 0 };
     const hitX = source?.x ?? enemy.x;
     const hitY = source?.y ?? enemy.y;
-    enemy.hp -= damage;
+    enemy.hp -= Math.max(1, damage - (enemy.armor ?? 0));
     enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.12);
     enemy.hitVx = (enemy.hitVx ?? 0) + sourceDirection.x * 90;
     enemy.hitVy = (enemy.hitVy ?? 0) + sourceDirection.y * 90;
@@ -326,12 +347,32 @@ export class GameSimulation {
     this.enemies.delete(enemy.id);
     const owner = [...this.players.values()].find((player) => source?.ownerId === player.id) ?? [...this.players.values()][0];
     if (owner) owner.kills += 1;
+    this.spawnSplitChildren(enemy);
     const repairChance = 0.12 + (owner?.stats.repairDropBonus ?? 0);
     const dropsRepair = enemy.type === "bruiser" && this.rng.next() < repairChance;
     const pickup = dropsRepair
       ? createPickup(this.entityId(), enemy.x, enemy.y, 28, "repair")
       : createPickup(this.entityId(), enemy.x, enemy.y, enemy.xp);
     this.pickups.set(pickup.id, pickup);
+  }
+
+  spawnSplitChildren(enemy) {
+    if (!enemy.splitCount || !enemy.splitChildType) return;
+    const angleOffset = this.rng.range(0, Math.PI * 2);
+    for (let i = 0; i < enemy.splitCount; i += 1) {
+      const angle = angleOffset + (Math.PI * 2 * i) / enemy.splitCount;
+      const child = createEnemy(
+        this.entityId(),
+        enemy.splitChildType,
+        enemy.x + Math.cos(angle) * 28,
+        enemy.y + Math.sin(angle) * 28,
+        this.wave,
+        { splitDepth: (enemy.splitDepth ?? 0) + 1 },
+      );
+      child.hitVx = Math.cos(angle) * 80;
+      child.hitVy = Math.sin(angle) * 80;
+      this.enemies.set(child.id, child);
+    }
   }
 
   spawnHitEffect(x, y, direction, damage, destroyed) {
