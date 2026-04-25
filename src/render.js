@@ -671,173 +671,300 @@ export class Renderer {
     const dps = this.currentDps(snapshot.elapsed);
     this.peakDps = Math.max(this.peakDps * 0.998, dps, 50);
 
-    const pad = this.viewport.width < 520 ? 12 : 18;
-    const compact = this.viewport.width < 560;
-    const hudWidth = compact ? Math.min(300, this.viewport.width - pad * 2) : Math.min(386, this.viewport.width - pad * 2);
+    const vw = this.viewport.width;
+    const vh = this.viewport.height;
+    const pad = vw < 520 ? 10 : 18;
     const t = snapshot.elapsed;
 
     ctx.save();
 
-    // === COMMAND TOWER (left) ===
-    const towerX = pad;
-    const towerY = pad;
-    const towerH = 178;
-    this.drawNeonPanel(towerX, towerY, hudWidth, towerH, "#64d9ff", 0.62);
-
-    // Accent header strip with level chip
-    const headerY = towerY + 10;
-    ctx.save();
-    ctx.fillStyle = "rgba(100, 217, 255, 0.08)";
-    roundRectPath(ctx, towerX + 10, headerY, hudWidth - 20, 22, 4);
-    ctx.fill();
-    ctx.restore();
-
-    // LEVEL chip (yellow / amber, the focal point alongside XP)
-    const chipW = 70;
-    const chipX = towerX + 14;
-    const chipY = headerY + 1;
-    this.drawHexChip(chipX, chipY, chipW, 20, "#ffc857", `LV ${player.level}`, hs.levelFlash);
-
-    // Status text
-    ctx.font = "800 10px Inter, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(173, 198, 222, 0.85)";
-    ctx.textAlign = "left";
-    ctx.fillText("PILOT // SYSTEMS NOMINAL", chipX + chipW + 10, headerY + 14);
-
-    // HP block
-    const barX = towerX + 60;
-    const barW = hudWidth - 76;
-    const hpY = headerY + 38;
-    this.drawUiIcon("hull", towerX + 30, hpY + 6, 32, 32);
+    // === HP BLOCK (top-left, edge-anchored, no panel) ===
+    const hpW = Math.max(220, Math.min(460, vw * 0.34));
+    const hpH = 22;
+    const hpX = pad;
+    const hpY = pad + 18; // leave room for label above
+    this.drawUiIcon("hull", hpX + 18, hpY + hpH / 2 + 2, 38, 38);
     const hpColor = hpHealthColor(hs.hpDisplay);
     const damageWobble = hs.damagePulse > 0 ? Math.sin(t * 50) * hs.damagePulse * 1.6 : 0;
+    const hpBarX = hpX + 44;
+    const hpBarW = hpW - 44;
     ctx.save();
     ctx.translate(damageWobble, 0);
-    this.drawStatBar(barX, hpY, barW, 16, hs.hpDisplay, hpColor, {
-      label: "HULL",
+    this.drawStatBar(hpBarX, hpY, hpBarW, hpH, hs.hpDisplay, hpColor, {
+      label: "HULL INTEGRITY",
       value: `${Math.ceil(player.hp)} / ${Math.round(maxHp)}`,
-      glow: 0.55 + hs.damagePulse * 0.45,
+      glow: 0.6 + hs.damagePulse * 0.5,
       pulse: hs.damagePulse,
       shield: hs.shieldDisplay,
       shieldColor: "#7df3ff",
-      ticks: 4,
+      ticks: 5,
       time: t,
     });
     ctx.restore();
 
-    // XP block (THE yellow bar — make it sing)
-    const xpY = hpY + 36;
-    this.drawUiIcon("xp", towerX + 30, xpY + 6, 30, 30);
-    this.drawStatBar(barX, xpY, barW, 14, hs.xpDisplay, "#ffd24a", {
-      label: "EXPERIENCE",
-      value: `${Math.floor(player.xp)} / ${player.nextLevelXp} XP`,
-      glow: 0.7 + hs.xpFlash * 0.6,
-      pulse: hs.xpFlash * 0.5,
-      ticks: 10,
-      gradient: ["#fff2a8", "#ffd24a", "#ff9a1f"],
-      sheen: true,
-      time: t,
-      yellow: true,
-      flash: hs.xpFlash,
-    });
-
-    // DPS micro bar
-    const dpsY = xpY + 32;
+    // DPS readout below HP (compact, no panel)
+    const dpsY = hpY + hpH + 18;
     ctx.font = "800 10px Inter, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(237, 247, 255, 0.78)";
-    ctx.fillText("DPS", barX, dpsY);
+    ctx.fillStyle = "rgba(237, 247, 255, 0.7)";
+    ctx.textAlign = "left";
+    ctx.fillText("DPS", hpBarX, dpsY);
     ctx.fillStyle = "#ffc857";
     ctx.textAlign = "right";
-    ctx.fillText(formatDamage(dps), barX + barW, dpsY);
+    ctx.fillText(formatDamage(dps), hpBarX + hpBarW, dpsY);
     ctx.textAlign = "left";
-    drawBar(ctx, barX, dpsY + 4, barW, 4, dps / this.peakDps, "#ff5b79");
+    drawBar(ctx, hpBarX, dpsY + 4, hpBarW, 3, dps / this.peakDps, "#ff5b79");
 
-    // Stat tiles row: Wave / Time / Kills
-    const tileY = towerY + towerH + 8;
-    const tileH = 50;
-    const tileGap = 6;
-    const tileCount = 3;
-    const tileW = (hudWidth - tileGap * (tileCount - 1)) / tileCount;
-    this.drawStatTile(towerX, tileY, tileW, tileH, "wave", "WAVE", String(snapshot.wave), "#b86cff");
-    this.drawStatTile(towerX + (tileW + tileGap), tileY, tileW, tileH, "timer", "TIME", formatTime(snapshot.elapsed), "#64d9ff");
-    this.drawStatTile(towerX + (tileW + tileGap) * 2, tileY, tileW, tileH, null, "KILLS", String(player.kills ?? 0), "#ff5b79");
+    // === STAT TILES — spread along top edge, center-anchored ===
+    if (vw >= 720) {
+      const tileH = 64;
+      const tileW = Math.min(120, (vw - hpW - 320 - pad * 4) / 3);
+      if (tileW >= 80) {
+        const tileGap = 8;
+        const totalW = tileW * 3 + tileGap * 2;
+        const tileStart = (vw - totalW) / 2;
+        const tileY = pad;
+        this.drawStatTile(tileStart, tileY, tileW, tileH, "wave", "WAVE", String(snapshot.wave), "#b86cff");
+        this.drawStatTile(tileStart + tileW + tileGap, tileY, tileW, tileH, "timer", "TIME", formatTime(snapshot.elapsed), "#64d9ff");
+        this.drawStatTile(tileStart + (tileW + tileGap) * 2, tileY, tileW, tileH, null, "KILLS", String(player.kills ?? 0), "#ff5b79");
+      }
+    } else {
+      // narrow viewport — stats below HP
+      const tileY = dpsY + 14;
+      const tileH = 52;
+      const tileW = (hpW - 12) / 3;
+      this.drawStatTile(hpX, tileY, tileW, tileH, "wave", "WAVE", String(snapshot.wave), "#b86cff");
+      this.drawStatTile(hpX + (tileW + 6), tileY, tileW, tileH, "timer", "TIME", formatTime(snapshot.elapsed), "#64d9ff");
+      this.drawStatTile(hpX + (tileW + 6) * 2, tileY, tileW, tileH, null, "KILLS", String(player.kills ?? 0), "#ff5b79");
+    }
 
     // === TARGETING / THREAT (top-right) ===
-    if (this.viewport.width >= 760) {
+    if (vw >= 760) {
       const target = snapshot.targeting?.primaryWeapon;
-      const tw = 252;
-      const th = 64;
-      const tx = this.viewport.width - tw - pad;
+      const tw = 304;
+      const th = 86;
+      const tx = vw - tw - pad;
       const ty = pad;
       this.drawNeonPanel(tx, ty, tw, th, "#ff5b79", 0.5);
       // Pulsing accent left edge
       const pulse = 0.6 + 0.4 * Math.sin(t * 3.4);
       ctx.save();
       ctx.fillStyle = `rgba(255, 91, 121, ${0.5 + pulse * 0.4})`;
-      ctx.fillRect(tx + 6, ty + 10, 3, th - 20);
+      ctx.fillRect(tx + 6, ty + 12, 3, th - 24);
       ctx.shadowColor = "rgba(255, 91, 121, 0.85)";
       ctx.shadowBlur = 10;
-      ctx.fillRect(tx + 6, ty + 10, 3, th - 20);
+      ctx.fillRect(tx + 6, ty + 12, 3, th - 24);
       ctx.restore();
 
-      this.drawUiIcon("target", tx + 32, ty + th / 2, 30, 30);
-      ctx.font = "900 13px Inter, system-ui, sans-serif";
-      ctx.fillStyle = "#ffeef1";
+      this.drawUiIcon("target", tx + 38, ty + 30, 36, 36);
+      ctx.font = "900 9px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255, 178, 192, 0.7)";
       ctx.textAlign = "left";
-      ctx.fillText(target ? target.strategy.toUpperCase() : "AUTO TARGET", tx + 56, ty + 26);
+      ctx.fillText("TARGETING DOCTRINE", tx + 64, ty + 18);
+      ctx.font = "900 16px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#ffeef1";
+      ctx.fillText(target ? target.strategy.toUpperCase() : "AUTO TARGET", tx + 64, ty + 38);
 
       const contacts = snapshot.enemies.length;
-      ctx.font = "700 11px Inter, system-ui, sans-serif";
+      ctx.font = "700 10px Inter, system-ui, sans-serif";
       ctx.fillStyle = "rgba(255, 178, 192, 0.85)";
-      ctx.fillText("THREAT LEVEL", tx + 56, ty + 42);
-      // Threat dots
-      const dotsX = tx + 144;
-      const dotY = ty + 39;
-      const threatLevel = clamp(Math.floor(contacts / 8), 0, 6);
-      for (let i = 0; i < 6; i += 1) {
+      ctx.fillText("THREAT", tx + 14, ty + 62);
+      // Threat dots — 8 dots, larger
+      const dotsX = tx + 64;
+      const dotY = ty + 60;
+      const threatLevel = clamp(Math.floor(contacts / 6), 0, 8);
+      for (let i = 0; i < 8; i += 1) {
         const lit = i < threatLevel;
         ctx.fillStyle = lit
-          ? `rgba(255, 91, 121, ${0.7 + Math.sin(t * 4 + i) * 0.2})`
-          : "rgba(255, 91, 121, 0.18)";
+          ? `rgba(255, 91, 121, ${0.7 + Math.sin(t * 4 + i) * 0.25})`
+          : "rgba(255, 91, 121, 0.16)";
         ctx.beginPath();
-        ctx.arc(dotsX + i * 10, dotY, 3, 0, Math.PI * 2);
+        ctx.arc(dotsX + i * 14, dotY, 4, 0, Math.PI * 2);
         ctx.fill();
+        if (lit) {
+          ctx.save();
+          ctx.shadowColor = "#ff5b79";
+          ctx.shadowBlur = 8;
+          ctx.fill();
+          ctx.restore();
+        }
       }
-      ctx.font = "900 12px Inter, system-ui, sans-serif";
+      ctx.font = "900 18px Inter, system-ui, sans-serif";
       ctx.fillStyle = "#ffeef1";
       ctx.textAlign = "right";
-      ctx.fillText(`${contacts} CONTACTS`, tx + tw - 14, ty + 56);
+      ctx.shadowColor = "rgba(255, 91, 121, 0.7)";
+      ctx.shadowBlur = 6;
+      ctx.fillText(`${contacts}`, tx + tw - 14, ty + 42);
+      ctx.shadowBlur = 0;
+      ctx.font = "700 9px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255, 178, 192, 0.7)";
+      ctx.fillText("CONTACTS", tx + tw - 14, ty + 56);
       ctx.textAlign = "left";
     }
+
+    // === XP BAR — full-width hero element, bottom edge ===
+    const xpH = 22;
+    const xpMargin = 0; // bleed to edge
+    const xpY = vh - xpH - xpMargin - 4;
+    const xpX = 0;
+    const xpW = vw;
+
+    // Backdrop strip behind bar — pure flat with subtle gradient & top hairline
+    ctx.save();
+    const bdH = xpH + 28;
+    const bdY = vh - bdH;
+    const bdGrad = ctx.createLinearGradient(0, bdY, 0, vh);
+    bdGrad.addColorStop(0, "rgba(4, 9, 20, 0)");
+    bdGrad.addColorStop(0.5, "rgba(4, 9, 20, 0.65)");
+    bdGrad.addColorStop(1, "rgba(4, 9, 20, 0.92)");
+    ctx.fillStyle = bdGrad;
+    ctx.fillRect(0, bdY, vw, bdH);
+    // Top hairline
+    ctx.fillStyle = "rgba(255, 210, 74, 0.35)";
+    ctx.fillRect(0, bdY, vw, 1);
+    ctx.fillStyle = "rgba(255, 210, 74, 0.08)";
+    ctx.fillRect(0, bdY + 1, vw, 1);
+    ctx.restore();
+
+    // Floor track for XP — flat, no rounded corners (true edge-bleed)
+    ctx.save();
+    ctx.fillStyle = "rgba(8, 14, 26, 0.92)";
+    ctx.fillRect(xpX, xpY, xpW, xpH);
+
+    // Fill
+    const xpFillW = xpW * clamp(hs.xpDisplay, 0, 1);
+    if (xpFillW > 0) {
+      const fg = ctx.createLinearGradient(0, xpY, 0, xpY + xpH);
+      fg.addColorStop(0, "#fff2a8");
+      fg.addColorStop(0.45, "#ffd24a");
+      fg.addColorStop(1, "#ff9a1f");
+      // Glow under fill
+      ctx.save();
+      ctx.shadowColor = "#ffd24a";
+      ctx.shadowBlur = 18 + hs.xpFlash * 22;
+      ctx.fillStyle = fg;
+      ctx.fillRect(xpX, xpY, xpFillW, xpH);
+      ctx.restore();
+      ctx.fillStyle = fg;
+      ctx.fillRect(xpX, xpY, xpFillW, xpH);
+
+      // Top sheen highlight (1/3 of bar)
+      const sheenG = ctx.createLinearGradient(0, xpY, 0, xpY + xpH * 0.55);
+      sheenG.addColorStop(0, "rgba(255, 255, 255, 0.4)");
+      sheenG.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = sheenG;
+      ctx.fillRect(xpX, xpY, xpFillW, xpH * 0.55);
+
+      // Animated sheen sweep
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(xpX, xpY, xpFillW, xpH);
+      ctx.clip();
+      const sweep = ((t * 0.18) % 1) * (xpFillW + 200) - 100;
+      const sg = ctx.createLinearGradient(sweep - 80, 0, sweep + 80, 0);
+      sg.addColorStop(0, "rgba(255, 255, 255, 0)");
+      sg.addColorStop(0.5, "rgba(255, 255, 255, 0.32)");
+      sg.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = sg;
+      ctx.fillRect(sweep - 80, xpY, 160, xpH);
+      ctx.restore();
+
+      // Leading-edge flash on XP gain
+      if (hs.xpFlash > 0.02 && xpFillW < xpW) {
+        ctx.save();
+        ctx.globalAlpha = hs.xpFlash;
+        const eg = ctx.createRadialGradient(xpFillW, xpY + xpH / 2, 0, xpFillW, xpY + xpH / 2, 36);
+        eg.addColorStop(0, "rgba(255, 255, 220, 0.85)");
+        eg.addColorStop(1, "rgba(255, 210, 74, 0)");
+        ctx.fillStyle = eg;
+        ctx.fillRect(xpFillW - 36, xpY - 8, 72, xpH + 16);
+        ctx.restore();
+      }
+    }
+
+    // Tick marks — kinetic segments
+    const tickCount = vw < 700 ? 12 : vw < 1100 ? 20 : 28;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.45)";
+    ctx.lineWidth = 1;
+    for (let i = 1; i < tickCount; i += 1) {
+      const tickX = (xpW * i) / tickCount;
+      ctx.beginPath();
+      ctx.moveTo(tickX, xpY + 3);
+      ctx.lineTo(tickX, xpY + xpH - 3);
+      ctx.stroke();
+    }
+
+    // Top + bottom hairlines on bar
+    ctx.fillStyle = "rgba(255, 240, 180, 0.55)";
+    ctx.fillRect(xpX, xpY, xpW, 1);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    ctx.fillRect(xpX, xpY + xpH - 1, xpW, 1);
+    ctx.restore();
+
+    // Level-up wave: bright gaussian sweep along the entire bar
+    if (hs.levelFlash > 0.02) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(xpX, xpY - 2, xpW, xpH + 4);
+      ctx.clip();
+      const waveT = 1 - hs.levelFlash; // 0 -> 1 over the flash duration
+      const waveX = waveT * (xpW + 240) - 120;
+      const wg = ctx.createLinearGradient(waveX - 160, 0, waveX + 160, 0);
+      wg.addColorStop(0, "rgba(255, 255, 255, 0)");
+      wg.addColorStop(0.5, `rgba(255, 255, 255, ${0.85 * Math.min(1, hs.levelFlash * 1.6)})`);
+      wg.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = wg;
+      ctx.fillRect(waveX - 160, xpY - 2, 320, xpH + 4);
+      ctx.restore();
+    }
+
+    // LEVEL chip — bottom-left, overlapping the XP bar's left edge
+    const chipH = 30;
+    const chipW = 84;
+    const chipX = pad;
+    const chipY = xpY + (xpH - chipH) / 2;
+    this.drawHexChip(chipX, chipY, chipW, chipH, "#ffc857", `LV ${player.level}`, hs.levelFlash);
+
+    // EXPERIENCE label + value — bottom-right
+    ctx.save();
+    ctx.font = "900 9px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(255, 230, 160, 0.7)";
+    ctx.textAlign = "right";
+    ctx.fillText("EXPERIENCE", vw - pad, xpY - 8);
+    ctx.font = "900 14px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffeed1";
+    ctx.shadowColor = "rgba(255, 210, 74, 0.7)";
+    ctx.shadowBlur = 8;
+    ctx.fillText(`${Math.floor(player.xp)} / ${player.nextLevelXp}`, vw - pad, xpY + xpH + 16);
+    ctx.shadowBlur = 0;
+    ctx.restore();
 
     // Vignette pulse on heavy damage
     if (hs.damagePulse > 0.05) {
       const a = hs.damagePulse * 0.32;
       const grad = ctx.createRadialGradient(
-        this.viewport.width / 2,
-        this.viewport.height / 2,
-        Math.min(this.viewport.width, this.viewport.height) * 0.35,
-        this.viewport.width / 2,
-        this.viewport.height / 2,
-        Math.max(this.viewport.width, this.viewport.height) * 0.7,
+        vw / 2,
+        vh / 2,
+        Math.min(vw, vh) * 0.35,
+        vw / 2,
+        vh / 2,
+        Math.max(vw, vh) * 0.7,
       );
       grad.addColorStop(0, "rgba(255, 60, 90, 0)");
       grad.addColorStop(1, `rgba(255, 60, 90, ${a})`);
       ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, this.viewport.width, this.viewport.height);
+      ctx.fillRect(0, 0, vw, vh);
     }
 
-    // Level-up celebratory ring flash
+    // Level-up top-edge band (companion to the bottom wave)
     if (hs.levelFlash > 0.02) {
       ctx.save();
-      ctx.globalAlpha = hs.levelFlash * 0.6;
-      const lg = ctx.createLinearGradient(0, 0, this.viewport.width, 0);
+      ctx.globalAlpha = hs.levelFlash * 0.55;
+      const lg = ctx.createLinearGradient(0, 0, vw, 0);
       lg.addColorStop(0, "rgba(255, 210, 74, 0)");
-      lg.addColorStop(0.5, "rgba(255, 210, 74, 0.45)");
+      lg.addColorStop(0.5, "rgba(255, 210, 74, 0.5)");
       lg.addColorStop(1, "rgba(255, 210, 74, 0)");
       ctx.fillStyle = lg;
-      ctx.fillRect(0, 0, this.viewport.width, 6);
-      ctx.fillRect(0, this.viewport.height - 6, this.viewport.width, 6);
+      ctx.fillRect(0, 0, vw, 4);
       ctx.restore();
     }
 
@@ -1060,17 +1187,26 @@ export class Renderer {
     const ctx = this.ctx;
     this.drawNeonPanel(x, y, width, height, accent, 0.5, 8);
     ctx.save();
-    if (icon) this.drawUiIcon(icon, x + 18, y + height / 2, 22, 22);
-    const tx = icon ? x + 34 : x + 12;
-    ctx.font = "700 9px Inter, system-ui, sans-serif";
+    // Accent top stripe — flat-with-glow modern feel
     ctx.fillStyle = hexToRgba(accent, 0.85);
+    ctx.fillRect(x + 10, y + 6, Math.max(20, width * 0.28), 2);
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 8;
+    ctx.fillRect(x + 10, y + 6, Math.max(20, width * 0.28), 2);
+    ctx.shadowBlur = 0;
+
+    if (icon) this.drawUiIcon(icon, x + width - 22, y + 22, 20, 20);
+    const tx = x + 12;
+    const tall = height >= 60;
+    ctx.font = "900 9px Inter, system-ui, sans-serif";
+    ctx.fillStyle = hexToRgba(accent, 0.9);
     ctx.textAlign = "left";
-    ctx.fillText(label, tx, y + 18);
-    ctx.font = "900 18px Inter, system-ui, sans-serif";
+    ctx.fillText(label, tx, y + 22);
+    ctx.font = tall ? "900 26px Inter, system-ui, sans-serif" : "900 20px Inter, system-ui, sans-serif";
     ctx.fillStyle = "#edf7ff";
-    ctx.shadowColor = hexToRgba(accent, 0.7);
-    ctx.shadowBlur = 6;
-    ctx.fillText(value, tx, y + 38);
+    ctx.shadowColor = hexToRgba(accent, 0.75);
+    ctx.shadowBlur = 8;
+    ctx.fillText(value, tx, y + height - 12);
     ctx.shadowBlur = 0;
     ctx.restore();
   }
