@@ -33,6 +33,7 @@ const optionInputs = {
 };
 const upgradePanel = document.querySelector("#upgrade-panel");
 const upgradeOptions = document.querySelector("#upgrade-options");
+const debugOverlay = document.querySelector("#debug-overlay");
 
 const visualOptions = loadVisualOptions();
 const renderer = new Renderer(canvas, visualOptions);
@@ -46,11 +47,24 @@ let ppoRunning = false;
 
 let accumulator = 0;
 let lastTime = performance.now();
+let debugVisible = false;
+const fpsMeter = {
+  frames: 0,
+  lastSample: performance.now(),
+  value: 0,
+};
+const damageMeter = {
+  seenEffectIds: new Set(),
+  samples: [],
+  total: 0,
+  windowSeconds: 5,
+};
 
 startRun.addEventListener("click", () => {
   simulation = createSimulation();
   accumulator = 0;
   lastTime = performance.now();
+  resetDebugMeters();
   runStarted = true;
   runRewardAwarded = false;
   mainMenu.classList.add("hidden");
@@ -77,7 +91,11 @@ optionsPanel.addEventListener("click", (event) => {
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !optionsPanel.classList.contains("hidden")) {
+  if (event.key === "F3" || event.key === "`") {
+    event.preventDefault();
+    debugVisible = !debugVisible;
+    debugOverlay.classList.toggle("hidden", !debugVisible);
+  } else if (event.key === "Escape" && !optionsPanel.classList.contains("hidden")) {
     closeOptionsPanel();
   } else if (event.key === "Escape" && !armoryPanel.classList.contains("hidden")) {
     closePanel(armoryPanel, openArmory);
@@ -98,6 +116,7 @@ for (const [key, inputElement] of Object.entries(optionInputs)) {
 function frame(now) {
   const delta = Math.min((now - lastTime) / 1000, GAME.maxDelta);
   lastTime = now;
+  updateFps(now);
 
   if (runStarted) {
     accumulator += delta;
@@ -115,6 +134,7 @@ function frame(now) {
   const snapshot = runStarted ? simulation.getSnapshot() : menuSnapshot();
   renderer.render(snapshot);
   syncUpgradePanel(snapshot, runStarted);
+  updateDebugOverlay(snapshot);
   requestAnimationFrame(frame);
 }
 
@@ -131,6 +151,84 @@ function awardRunScrapIfNeeded() {
   metaProgress.best.wave = Math.max(metaProgress.best.wave, snapshot.wave);
   runRewardAwarded = true;
   saveMetaProgress();
+}
+
+function resetDebugMeters() {
+  damageMeter.seenEffectIds.clear();
+  damageMeter.samples = [];
+  damageMeter.total = 0;
+}
+
+function updateFps(now) {
+  fpsMeter.frames += 1;
+  const elapsed = now - fpsMeter.lastSample;
+  if (elapsed < 500) return;
+  fpsMeter.value = Math.round((fpsMeter.frames * 1000) / elapsed);
+  fpsMeter.frames = 0;
+  fpsMeter.lastSample = now;
+}
+
+function updateDamageMeter(snapshot) {
+  for (const effect of snapshot.effects ?? []) {
+    const damage = Number(effect.damage);
+    if (!effect.id || damage <= 0 || damageMeter.seenEffectIds.has(effect.id)) continue;
+    damageMeter.seenEffectIds.add(effect.id);
+    damageMeter.samples.push({ time: snapshot.elapsed, damage });
+    damageMeter.total += damage;
+  }
+
+  const oldest = snapshot.elapsed - damageMeter.windowSeconds;
+  damageMeter.samples = damageMeter.samples.filter((sample) => sample.time >= oldest);
+  if (damageMeter.seenEffectIds.size > 500) {
+    const liveEffectIds = new Set((snapshot.effects ?? []).map((effect) => effect.id));
+    damageMeter.seenEffectIds = new Set([...damageMeter.seenEffectIds].filter((id) => liveEffectIds.has(id)));
+  }
+}
+
+function updateDebugOverlay(snapshot) {
+  updateDamageMeter(snapshot);
+  if (!debugVisible) return;
+  const player = snapshot.players.find((item) => item.id === snapshot.localPlayerId) ?? snapshot.players[0];
+  const damageWindowTotal = damageMeter.samples.reduce((total, sample) => total + sample.damage, 0);
+  const dps = damageWindowTotal / damageMeter.windowSeconds;
+  const rows = [
+    ["FPS", fpsMeter.value],
+    ["Tick", snapshot.tick],
+    ["Elapsed", formatDebugTime(snapshot.elapsed)],
+    ["State", snapshot.state],
+    ["Wave", snapshot.wave],
+    ["Enemies", snapshot.enemies.length],
+    ["Projectiles", snapshot.projectiles.length],
+    ["Pickups", snapshot.pickups.length],
+    ["Player HP", player ? `${Math.ceil(player.hp)}/${Math.ceil(player.stats.maxHp)}` : "-"],
+    ["Level", player?.level ?? "-"],
+    ["Kills", player?.kills ?? "-"],
+    ["DPS", dps.toFixed(1)],
+    ["Damage", Math.round(damageMeter.total)],
+  ];
+
+  debugOverlay.replaceChildren(
+    ...rows.map(([label, value]) => {
+      const row = document.createElement("div");
+      row.className = "debug-row";
+      row.append(createDebugCell(label, "debug-label"), createDebugCell(value, "debug-value"));
+      return row;
+    }),
+  );
+}
+
+function createDebugCell(value, className) {
+  const cell = document.createElement("span");
+  cell.className = className;
+  cell.textContent = String(value);
+  return cell;
+}
+
+function formatDebugTime(seconds) {
+  const safeSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = Math.floor(safeSeconds % 60);
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
 function openPanel(panel, focusTarget) {

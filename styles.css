@@ -40,6 +40,48 @@ body {
   image-rendering: auto;
 }
 
+.debug-overlay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 6;
+  width: min(240px, calc(100vw - 24px));
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(145, 168, 189, 0.26);
+  border-radius: 8px;
+  background: rgba(3, 8, 18, 0.72);
+  color: var(--text);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+.debug-overlay.hidden {
+  display: none;
+}
+
+.debug-row {
+  display: grid;
+  grid-template-columns: minmax(82px, 1fr) auto;
+  gap: 12px;
+  min-height: 16px;
+}
+
+.debug-label {
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.debug-value {
+  color: var(--cyan);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .main-menu {
   position: absolute;
   inset: 0;

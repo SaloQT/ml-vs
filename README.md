@@ -17,6 +17,7 @@ Then open `http://localhost:4173`.
 - Move with `WASD` or arrow keys.
 - Weapons auto-aim based on the targeting configuration.
 - Pick one of three upgrades when you level up.
+- Toggle the debug inspector with `F3` or the backquote key.
 
 ## Targeting
 
