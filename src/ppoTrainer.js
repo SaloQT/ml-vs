@@ -139,19 +139,22 @@ export class PpoTrainer {
   }
 
   updatePolicy(episodes, baseline) {
-    const learningRate = 0.00012;
-    const clip = 0.16;
+    const learningRate = 0.00004;
+    const clip = 0.12;
     const allSteps = [];
-    const advantages = episodes.map((episode) => episode.reward - baseline);
-    const averageAdvantage = mean(advantages);
-    const advantageDeviation = Math.sqrt(mean(advantages.map((advantage) => (advantage - averageAdvantage) ** 2))) || 1;
     for (const episode of episodes) {
-      const advantage = (episode.reward - baseline - averageAdvantage) / advantageDeviation;
+      let returnSoFar = episode.dead ? -8 : 0;
+      for (let index = episode.trajectory.length - 1; index >= 0; index -= 1) {
+        const step = episode.trajectory[index];
+        returnSoFar = step.reward + returnSoFar * 0.985;
+        step.return = returnSoFar;
+      }
       for (const step of episode.trajectory) {
-        step.advantage = advantage;
         allSteps.push(step);
       }
     }
+    const averageReturn = mean(allSteps.map((step) => step.return));
+    const returnDeviation = Math.sqrt(mean(allSteps.map((step) => (step.return - averageReturn) ** 2))) || 1;
 
     for (const step of allSteps) {
       const probabilities = this.probabilities(step.features);
@@ -159,7 +162,7 @@ export class PpoTrainer {
       const clippedRatio = Math.max(1 - clip, Math.min(1 + clip, ratio));
       for (let actionIndex = 0; actionIndex < ACTIONS.length; actionIndex += 1) {
         const indicator = actionIndex === step.action ? 1 : 0;
-        const advantage = Math.max(-3, Math.min(3, step.advantage));
+        const advantage = Math.max(-3, Math.min(3, (step.return - averageReturn) / returnDeviation));
         const gradient = (indicator - probabilities[actionIndex]) * advantage * clippedRatio;
         for (let j = 0; j < step.features.length; j += 1) {
           this.weights[actionIndex][j] += learningRate * gradient * step.features[j];
