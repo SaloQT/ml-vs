@@ -124,7 +124,8 @@ export function calculateRunScrap(snapshot) {
   const seconds = Math.floor(snapshot.elapsed);
   const kills = player?.kills ?? 0;
   const bonus = player?.stats?.salvageBonus ?? 0;
-  const raw = seconds * 0.75 + kills * 4 + Math.max(0, snapshot.wave - 1) * 35;
+  const collectedScrap = player?.scrap ?? 0;
+  const raw = seconds * 0.75 + kills * 4 + Math.max(0, snapshot.wave - 1) * 35 + collectedScrap;
   return Math.max(8, Math.floor(raw * (1 + bonus)));
 }
 

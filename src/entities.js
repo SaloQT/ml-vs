@@ -12,10 +12,14 @@ export function createPlayer(id, x = 0, y = 0) {
     facingY: 0,
     radius: PLAYER_BASE.radius,
     hp: PLAYER_BASE.maxHp,
+    shield: 0,
     xp: 0,
+    scrap: 0,
     level: 1,
     nextLevelXp: 10,
     invulnerableFor: 0,
+    overdriveFor: 0,
+    magnetBurstFor: 0,
     cooldown: 0,
     shotCount: 0,
     ownedUpgrades: new Set(),
@@ -81,13 +85,23 @@ export function createProjectile(id, ownerId, x, y, vx, vy, damage, radius = 5, 
 }
 
 export function createPickup(id, x, y, value, type = "xp") {
+  const radiusByType = {
+    xp: 8,
+    scrap: 9,
+    repair: 12,
+    shield: 12,
+    overdrive: 11,
+    magnet: 11,
+    cache: 15,
+  };
+
   return {
     id,
     kind: "pickup",
     type,
     x,
     y,
-    radius: type === "repair" ? 12 : 8,
+    radius: radiusByType[type] ?? 8,
     value,
   };
 }

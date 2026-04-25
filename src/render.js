@@ -117,8 +117,8 @@ export class Renderer {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     for (const pickup of snapshot.pickups) {
-      const color = pickup.type === "repair" ? "rgba(85, 214, 255, 0.42)" : "rgba(255, 200, 87, 0.36)";
-      this.drawGlow(pickup.x, pickup.y, pickup.type === "repair" ? 58 : 42, color);
+      const style = pickupStyle(pickup.type);
+      this.drawGlow(pickup.x, pickup.y, style.glowRadius, style.glow);
     }
     for (const projectile of snapshot.projectiles) {
       this.drawGlow(projectile.x, projectile.y, 46, "rgba(100, 225, 255, 0.42)");
@@ -262,17 +262,30 @@ export class Renderer {
 
   drawPickup(pickup, elapsed) {
     const ctx = this.ctx;
-    const sprite = pickup.type === "repair" ? "shieldPickup" : "xpCrystal";
-    const size = pickup.type === "repair" ? 34 : 24;
+    const style = pickupStyle(pickup.type);
     const bob = Math.sin(elapsed * 5 + pickup.x * 0.03) * 4;
     const pulse = 1 + Math.sin(elapsed * 7 + pickup.y * 0.02) * 0.07;
-    const rotation = pickup.type === "repair" ? Math.sin(elapsed * 2.5) * 0.08 : elapsed * 1.2;
-    if (this.drawSprite(sprite, pickup.x, pickup.y + bob, size * pulse, size * pulse, rotation)) return;
-    ctx.fillStyle = "#ffc857";
+    const rotation = style.sprite === "shieldPickup" ? Math.sin(elapsed * 2.5) * 0.08 : elapsed * style.spin;
+    if (this.drawSprite(style.sprite, pickup.x, pickup.y + bob, style.size * pulse, style.size * pulse, rotation)) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = style.fill;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pickup.x, pickup.y + bob, pickup.radius + 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+    ctx.fillStyle = style.fill;
     ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.rect(pickup.x - pickup.radius, pickup.y - pickup.radius, pickup.radius * 2, pickup.radius * 2);
+    if (style.shape === "circle") {
+      ctx.arc(pickup.x, pickup.y + bob, pickup.radius, 0, Math.PI * 2);
+    } else {
+      ctx.rect(pickup.x - pickup.radius, pickup.y + bob - pickup.radius, pickup.radius * 2, pickup.radius * 2);
+    }
     ctx.fill();
     ctx.stroke();
   }
@@ -286,13 +299,23 @@ export class Renderer {
       this.drawExplosionEffect(effect);
       return;
     }
-    if (effect.type !== "gravityWell") return;
+    if (effect.type !== "gravityWell" && effect.type !== "overdrive" && effect.type !== "magnetBurst" && effect.type !== "cacheOpened") return;
     const progress = 1 - effect.ttl / effect.duration;
     const alpha = 1 - progress;
     const size = effect.radius * (0.55 + progress * 0.7);
     this.ctx.save();
     this.ctx.globalAlpha = alpha * 0.78;
-    this.drawSprite("gravityWell", effect.x, effect.y, size, size);
+    if (effect.type === "gravityWell") {
+      this.drawSprite("gravityWell", effect.x, effect.y, size, size);
+    } else {
+      const style = collectionEffectStyle(effect.type);
+      this.drawGlow(effect.x, effect.y, size, style.glow);
+      this.ctx.strokeStyle = style.stroke;
+      this.ctx.lineWidth = 4 * alpha;
+      this.ctx.beginPath();
+      this.ctx.arc(effect.x, effect.y, size * 0.42, 0, Math.PI * 2);
+      this.ctx.stroke();
+    }
     this.ctx.restore();
   }
 
@@ -382,13 +405,14 @@ export class Renderer {
     }
 
     for (const pickup of snapshot.pickups) {
+      const style = pickupStyle(pickup.type);
       this.emitParticleBurst(pickup.x, pickup.y, 8 * dt, {
         baseVx: 0,
         baseVy: -18,
         spread: 32,
-        size: pickup.type === "repair" ? 2.4 : 2,
+        size: style.particleSize,
         ttl: 0.8,
-        color: pickup.type === "repair" ? "rgba(95, 222, 255, 0.58)" : "rgba(255, 207, 87, 0.58)",
+        color: style.particle,
       });
     }
     this.emitSpaceDust(dt);
@@ -792,6 +816,107 @@ function normalizeVector(x, y) {
   const length = Math.hypot(x, y);
   if (!length) return { x: 1, y: 0 };
   return { x: x / length, y: y / length };
+}
+
+function pickupStyle(type) {
+  const styles = {
+    xp: {
+      sprite: "xpCrystal",
+      size: 24,
+      spin: 1.2,
+      shape: "rect",
+      fill: "#ffc857",
+      glow: "rgba(255, 200, 87, 0.36)",
+      glowRadius: 42,
+      particle: "rgba(255, 207, 87, 0.58)",
+      particleSize: 2,
+    },
+    scrap: {
+      sprite: "xpCrystal",
+      size: 22,
+      spin: 0.8,
+      shape: "rect",
+      fill: "#b6c2cf",
+      glow: "rgba(184, 194, 207, 0.32)",
+      glowRadius: 38,
+      particle: "rgba(198, 210, 220, 0.56)",
+      particleSize: 1.9,
+    },
+    repair: {
+      sprite: "shieldPickup",
+      size: 34,
+      spin: 0.15,
+      shape: "circle",
+      fill: "#55d6ff",
+      glow: "rgba(85, 214, 255, 0.42)",
+      glowRadius: 58,
+      particle: "rgba(95, 222, 255, 0.58)",
+      particleSize: 2.4,
+    },
+    shield: {
+      sprite: "shieldPickup",
+      size: 32,
+      spin: 0.12,
+      shape: "circle",
+      fill: "#7df3ff",
+      glow: "rgba(125, 243, 255, 0.38)",
+      glowRadius: 54,
+      particle: "rgba(125, 243, 255, 0.58)",
+      particleSize: 2.3,
+    },
+    overdrive: {
+      sprite: "xpCrystal",
+      size: 28,
+      spin: 2.4,
+      shape: "rect",
+      fill: "#ff5b79",
+      glow: "rgba(255, 91, 121, 0.42)",
+      glowRadius: 56,
+      particle: "rgba(255, 91, 121, 0.62)",
+      particleSize: 2.4,
+    },
+    magnet: {
+      sprite: "xpCrystal",
+      size: 28,
+      spin: 1.7,
+      shape: "circle",
+      fill: "#9d7dff",
+      glow: "rgba(157, 125, 255, 0.42)",
+      glowRadius: 56,
+      particle: "rgba(157, 125, 255, 0.62)",
+      particleSize: 2.4,
+    },
+    cache: {
+      sprite: "shieldPickup",
+      size: 40,
+      spin: 0.25,
+      shape: "rect",
+      fill: "#ffe38a",
+      glow: "rgba(255, 227, 138, 0.48)",
+      glowRadius: 70,
+      particle: "rgba(255, 227, 138, 0.72)",
+      particleSize: 2.8,
+    },
+  };
+  return styles[type] ?? styles.xp;
+}
+
+function collectionEffectStyle(type) {
+  const styles = {
+    overdrive: {
+      glow: "rgba(255, 91, 121, 0.34)",
+      stroke: "rgba(255, 160, 168, 0.86)",
+    },
+    magnetBurst: {
+      glow: "rgba(157, 125, 255, 0.32)",
+      stroke: "rgba(207, 190, 255, 0.84)",
+    },
+    cacheOpened: {
+      glow: "rgba(255, 227, 138, 0.38)",
+      stroke: "rgba(255, 246, 184, 0.88)",
+    },
+  };
+  return styles[type] ?? styles.overdrive;
 }
 
 function roundRect(ctx, x, y, width, height, radius) {
