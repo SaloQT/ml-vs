@@ -4,6 +4,7 @@
     "test": "node --test",
     "balance:economy": "node scripts/economy-balance.mjs",
     "benchmark:ppo": "node scripts/ppo-benchmark.mjs",
-    "ppo:benchmark": "node scripts/ppo-benchmark.mjs"
+    "ppo:benchmark": "node scripts/ppo-benchmark.mjs",
+    "ppo:train": "node scripts/ppo-train.mjs"
   }
 }
