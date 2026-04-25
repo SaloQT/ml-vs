@@ -144,6 +144,12 @@ export class GameSimulation {
         this.rollDamage(player),
         player.stats.projectileRadius,
         player.stats.projectileTtl,
+        {
+          pierce: player.stats.projectilePierce,
+          chainArcs: player.stats.chainArcs,
+          chainRange: player.stats.chainRange,
+          chainDamageMultiplier: player.stats.chainDamageMultiplier,
+        },
       );
       this.projectiles.set(projectile.id, projectile);
     }
@@ -250,10 +256,17 @@ export class GameSimulation {
       }
 
       for (const enemy of this.enemies.values()) {
+        if (projectile.hitEnemyIds?.includes(enemy.id)) continue;
         const hitDistance = projectile.radius + enemy.radius;
         if (distanceSq(projectile.x, projectile.y, enemy.x, enemy.y) <= hitDistance * hitDistance) {
+          projectile.hitEnemyIds?.push(enemy.id);
           this.damageEnemy(enemy, projectile.damage, projectile);
-          this.projectiles.delete(projectile.id);
+          this.chainProjectileDamage(projectile, enemy);
+          if (projectile.pierce > 0) {
+            projectile.pierce -= 1;
+          } else {
+            this.projectiles.delete(projectile.id);
+          }
           break;
         }
       }
@@ -332,6 +345,39 @@ export class GameSimulation {
       ? createPickup(this.entityId(), enemy.x, enemy.y, 28, "repair")
       : createPickup(this.entityId(), enemy.x, enemy.y, enemy.xp);
     this.pickups.set(pickup.id, pickup);
+  }
+
+  chainProjectileDamage(projectile, firstEnemy) {
+    if (!projectile.chainArcs || !projectile.chainRange || projectile.chainDamageMultiplier <= 0) return;
+    const chainedEnemyIds = new Set([firstEnemy.id]);
+    let sourceEnemy = firstEnemy;
+    for (let arc = 0; arc < projectile.chainArcs; arc += 1) {
+      const target = this.nearestChainTarget(sourceEnemy, chainedEnemyIds, projectile.chainRange);
+      if (!target) return;
+      chainedEnemyIds.add(target.id);
+      this.damageEnemy(target, projectile.damage * projectile.chainDamageMultiplier, {
+        ownerId: projectile.ownerId,
+        x: sourceEnemy.x,
+        y: sourceEnemy.y,
+        vx: target.x - sourceEnemy.x,
+        vy: target.y - sourceEnemy.y,
+      });
+      sourceEnemy = target;
+    }
+  }
+
+  nearestChainTarget(sourceEnemy, excludedIds, range) {
+    let nearest = null;
+    let best = range * range;
+    for (const enemy of this.enemies.values()) {
+      if (excludedIds.has(enemy.id)) continue;
+      const dist = distanceSq(sourceEnemy.x, sourceEnemy.y, enemy.x, enemy.y);
+      if (dist <= best) {
+        best = dist;
+        nearest = enemy;
+      }
+    }
+    return nearest;
   }
 
   spawnHitEffect(x, y, direction, damage, destroyed) {
