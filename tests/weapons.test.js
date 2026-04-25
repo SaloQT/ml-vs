@@ -27,6 +27,36 @@ function addEnemy(simulation, id, x, y, hp = 20) {
   return enemy;
 }
 
+test("primary weapon waits for tight facing alignment before firing", () => {
+  const simulation = new GameSimulation({ seed: 19 });
+  const player = resetCombat(simulation);
+  player.facingX = 1;
+  player.facingY = 0;
+  const distance = 240;
+  const angle = (5 * Math.PI) / 180;
+  addEnemy(simulation, "off-angle", Math.cos(angle) * distance, Math.sin(angle) * distance, 20);
+
+  assert.equal(simulation.canFirePrimaryWeapon(player), false);
+});
+
+test("primary weapon fires along the locked target direction after alignment", () => {
+  const simulation = new GameSimulation({ seed: 20 });
+  const player = resetCombat(simulation);
+  player.facingX = 1;
+  player.facingY = 0;
+  player.cooldown = 0;
+  const distance = 240;
+  const angle = (2 * Math.PI) / 180;
+  addEnemy(simulation, "aligned-target", Math.cos(angle) * distance, Math.sin(angle) * distance, 20);
+
+  simulation.updatePlayers(0);
+
+  const [projectile] = simulation.projectiles.values();
+  assert.ok(projectile);
+  assert.ok(projectile.vy > 0, "projectile should use target angle instead of stale horizontal facing");
+  assert.equal(Number((projectile.vy / projectile.vx).toFixed(6)), Number(Math.tan(angle).toFixed(6)));
+});
+
 test("phase lance upgrade enables and scales projectile pierce", () => {
   const simulation = new GameSimulation({ seed: 14 });
   const player = resetCombat(simulation);

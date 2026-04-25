@@ -62,19 +62,57 @@ test("armored elite enemies mitigate incoming damage and expose affix state", ()
   assert.equal(simulation.getSnapshot().enemies[0].eliteAffix, "armored");
 });
 
-test("swift elite enemies weave while chasing instead of moving straight in", () => {
+test("hasted elite enemies weave while chasing instead of moving straight in", () => {
   const simulation = new GameSimulation({ seed: 23 });
   const player = resetArena(simulation);
   player.x = 0;
   player.y = 0;
 
-  const swift = createEnemy("swift-1", "drone", -100, 0, 3, { eliteAffix: "swift" });
-  simulation.enemies.set(swift.id, swift);
+  const hasted = createEnemy("hasted-1", "drone", -100, 0, 3, { affixes: ["hasted"] });
+  simulation.enemies.set(hasted.id, hasted);
 
   simulation.updateEnemies(0.25);
 
-  assert.equal(swift.eliteAffix, "swift");
-  assert.ok(swift.x > -100, "swift enemy should still close distance on the target");
-  assert.notEqual(Number(swift.y.toFixed(6)), 0);
-  assert.ok(swift.strafePhase > 0);
+  assert.deepEqual(hasted.affixes, ["hasted"]);
+  assert.equal(hasted.eliteAffix, "hasted");
+  assert.ok(hasted.x > -100, "hasted enemy should still close distance on the target");
+  assert.notEqual(Number(hasted.y.toFixed(6)), 0);
+  assert.ok(hasted.strafePhase > 0);
+});
+
+test("rare enemies can stack distinct affixes and regenerate", () => {
+  const simulation = new GameSimulation({ seed: 24 });
+  resetArena(simulation);
+
+  const rare = createEnemy("rare-1", "bulwark", 160, 0, 8, { affixes: ["armored", "regenerating", "hasted"] });
+  simulation.enemies.set(rare.id, rare);
+  rare.hp -= 20;
+  const damagedHp = rare.hp;
+
+  simulation.updateEnemies(0.5);
+
+  assert.equal(rare.rarity, "rare");
+  assert.deepEqual(rare.affixes, ["armored", "regenerating", "hasted"]);
+  assert.equal(rare.eliteAffix, "armored");
+  assert.ok(rare.armor >= 6);
+  assert.ok(rare.regenPerSecond > 0);
+  assert.ok(rare.hp > damagedHp);
+  assert.ok(rare.hp <= rare.maxHp);
+});
+
+test("volatile affix creates a distinguishable burst and damages nearby players on death", () => {
+  const simulation = new GameSimulation({ seed: 25 });
+  const player = resetArena(simulation);
+  player.x = 0;
+  player.y = 0;
+  player.invulnerableFor = 0;
+
+  const volatile = createEnemy("volatile-1", "stalker", 40, 0, 7, { affixes: ["volatile"] });
+  simulation.enemies.set(volatile.id, volatile);
+
+  simulation.damageEnemy(volatile, volatile.hp, { ownerId: "p1", x: 20, y: 0, vx: 1, vy: 0 });
+
+  assert.equal(simulation.enemies.has(volatile.id), false);
+  assert.ok(player.hp < player.stats.maxHp);
+  assert.ok([...simulation.effects.values()].some((effect) => effect.type === "volatileBurst"));
 });

@@ -1,5 +1,5 @@
 import { GAME } from "./config.js";
-import { loadSpriteSheet, loadUiSheet, SPRITE_SHEET, UI_SHEET } from "./assets.js";
+import { ENEMY_SHEET, loadEnemySheet, loadSpriteSheet, loadUiSheet, SPRITE_SHEET, UI_SHEET } from "./assets.js";
 import { clamp } from "./math.js";
 
 export class Renderer {
@@ -14,6 +14,7 @@ export class Renderer {
     };
     this.camera = { x: 0, y: 0, scale: 1 };
     this.sprites = loadSpriteSheet();
+    this.enemySprites = loadEnemySheet();
     this.uiSprites = loadUiSheet();
     this.stars = createStarfield(420);
     this.particles = [];
@@ -208,24 +209,32 @@ export class Renderer {
   drawEnemy(enemy, elapsed) {
     const ctx = this.ctx;
     const health = clamp(enemy.hp / enemy.maxHp, 0, 1);
-    const spriteName = enemy.type === "bruiser" ? "enemyBruiser" : "enemyDrone";
-    const bob = Math.sin(elapsed * (enemy.type === "bruiser" ? 3.2 : 5.4) + numericId(enemy.id)) * 2.2;
-    const pulse = 1 + Math.sin(elapsed * 4.5 + numericId(enemy.id)) * (enemy.type === "bruiser" ? 0.025 : 0.05);
+    const spriteName = enemySpriteName(enemy);
+    const bob = Math.sin(elapsed * (enemy.type === "bruiser" || enemy.type === "bulwark" ? 3.2 : 5.4) + numericId(enemy.id)) * 2.2;
+    const pulse = 1 + Math.sin(elapsed * 4.5 + numericId(enemy.id)) * (enemy.type === "bruiser" || enemy.type === "bulwark" ? 0.025 : 0.05);
     const hitFlash = clamp(enemy.hitFlash / 0.12, 0, 1);
     const hitScale = 1 + hitFlash * 0.16;
     const width = enemyDrawWidth(enemy) * pulse;
     const height = enemyDrawHeight(enemy) * pulse;
     const rotation =
-      (enemy.type === "bruiser" ? Math.sin(elapsed * 1.8 + numericId(enemy.id)) * 0.04 : elapsed * 0.7) +
+      (enemy.type === "bruiser" || enemy.type === "bulwark" ? Math.sin(elapsed * 1.8 + numericId(enemy.id)) * 0.04 : elapsed * 0.7) +
       hitFlash * 0.1;
-    if (!this.drawSprite(spriteName, enemy.x, enemy.y + bob, width * hitScale, height * hitScale, rotation)) {
+    if (!spriteName || !this.drawEnemySprite(spriteName, enemy.x, enemy.y + bob, width * hitScale, height * hitScale, rotation)) {
       ctx.fillStyle = enemyFillColor(enemy);
       ctx.beginPath();
-      if (enemy.type === "splitter") {
+      if (enemy.type === "splitter" || enemy.type === "spitter") {
         ctx.moveTo(enemy.x, enemy.y + bob - enemy.radius);
         ctx.lineTo(enemy.x + enemy.radius, enemy.y + bob + enemy.radius * 0.65);
         ctx.lineTo(enemy.x - enemy.radius, enemy.y + bob + enemy.radius * 0.65);
         ctx.closePath();
+      } else if (enemy.type === "stalker") {
+        ctx.moveTo(enemy.x, enemy.y + bob - enemy.radius * 0.95);
+        ctx.lineTo(enemy.x + enemy.radius * 0.85, enemy.y + bob);
+        ctx.lineTo(enemy.x, enemy.y + bob + enemy.radius * 0.95);
+        ctx.lineTo(enemy.x - enemy.radius * 0.85, enemy.y + bob);
+        ctx.closePath();
+      } else if (enemy.type === "bulwark") {
+        ctx.rect(enemy.x - enemy.radius * 0.85, enemy.y + bob - enemy.radius * 0.85, enemy.radius * 1.7, enemy.radius * 1.7);
       } else {
         ctx.arc(enemy.x, enemy.y + bob, enemy.radius, 0, Math.PI * 2);
       }
@@ -234,12 +243,12 @@ export class Renderer {
       ctx.lineWidth = 2;
       ctx.stroke();
     }
-    if (enemy.eliteAffix) this.drawEliteRing(enemy, bob, elapsed);
+    if (enemy.affixes?.length || enemy.eliteAffix) this.drawAffixAuras(enemy, bob, elapsed);
     if (hitFlash > 0) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.globalAlpha = hitFlash * 0.72;
-      ctx.fillStyle = enemy.type === "bruiser" ? "#f4b7ff" : "#ffffff";
+      ctx.fillStyle = enemy.type === "bruiser" || enemy.type === "bulwark" ? "#f4b7ff" : "#ffffff";
       ctx.beginPath();
       ctx.arc(enemy.x, enemy.y + bob, enemy.radius * (1.25 + hitFlash * 0.35), 0, Math.PI * 2);
       ctx.fill();
@@ -249,18 +258,34 @@ export class Renderer {
     ctx.fillRect(enemy.x - enemy.radius, enemy.y + bob - enemy.radius - 10, enemy.radius * 2 * health, 3);
   }
 
-  drawEliteRing(enemy, bob, elapsed) {
+  drawAffixAuras(enemy, bob, elapsed) {
     const ctx = this.ctx;
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.strokeStyle = enemy.eliteAffix === "armored" ? "rgba(140, 245, 255, 0.82)" : "rgba(255, 211, 92, 0.86)";
-    ctx.lineWidth = 3;
-    ctx.setLineDash(enemy.eliteAffix === "swift" ? [8, 7] : []);
-    ctx.lineDashOffset = -elapsed * 24;
-    ctx.beginPath();
-    ctx.arc(enemy.x, enemy.y + bob, enemy.radius + 8, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+    const affixes = enemy.affixes?.length ? enemy.affixes : [enemy.eliteAffix];
+    for (let i = 0; i < affixes.length; i += 1) {
+      const style = affixAuraStyle(affixes[i]);
+      const radius = enemy.radius + 8 + i * 7 + Math.sin(elapsed * style.pulse + i) * 1.5;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = style.stroke;
+      ctx.lineWidth = i === 0 ? 3 : 2;
+      ctx.setLineDash(style.dash);
+      ctx.lineDashOffset = -elapsed * style.spin * style.dashDirection;
+      ctx.beginPath();
+      ctx.arc(enemy.x, enemy.y + bob, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = style.dot;
+      for (let dot = 0; dot < style.dots; dot += 1) {
+        const angle = elapsed * style.spin * 0.08 * style.dashDirection + (Math.PI * 2 * dot) / style.dots;
+        ctx.beginPath();
+        ctx.arc(enemy.x + Math.cos(angle) * radius, enemy.y + bob + Math.sin(angle) * radius, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  drawEliteRing(enemy, bob, elapsed) {
+    this.drawAffixAuras(enemy, bob, elapsed);
   }
 
   drawProjectile(projectile, elapsed) {
@@ -320,7 +345,15 @@ export class Renderer {
       this.drawExplosionEffect(effect);
       return;
     }
-    if (effect.type !== "gravityWell" && effect.type !== "overdrive" && effect.type !== "magnetBurst" && effect.type !== "cacheOpened") return;
+    if (
+      effect.type !== "gravityWell" &&
+      effect.type !== "overdrive" &&
+      effect.type !== "magnetBurst" &&
+      effect.type !== "cacheOpened" &&
+      effect.type !== "volatileBurst"
+    ) {
+      return;
+    }
     const progress = 1 - effect.ttl / effect.duration;
     const alpha = 1 - progress;
     const size = effect.radius * (0.55 + progress * 0.7);
@@ -328,6 +361,13 @@ export class Renderer {
     this.ctx.globalAlpha = alpha * 0.78;
     if (effect.type === "gravityWell") {
       this.drawSprite("gravityWell", effect.x, effect.y, size, size);
+    } else if (effect.type === "volatileBurst") {
+      this.drawGlow(effect.x, effect.y, size, "rgba(255, 91, 121, 0.44)");
+      this.ctx.strokeStyle = `rgba(255, 200, 87, ${0.82 * (1 - progress)})`;
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.arc(effect.x, effect.y, size * 0.5, 0, Math.PI * 2);
+      this.ctx.stroke();
     } else {
       const style = collectionEffectStyle(effect.type);
       this.drawGlow(effect.x, effect.y, size, style.glow);
@@ -715,6 +755,11 @@ export class Renderer {
     return this.drawSheetSprite(this.uiSprites, UI_SHEET.sprites, name, x, y, width, height, rotation);
   }
 
+  drawEnemySprite(name, x, y, width, height, rotation = 0) {
+    if (SPRITE_SHEET.sprites[name]) return this.drawSprite(name, x, y, width, height, rotation);
+    return this.drawSheetSprite(this.enemySprites, ENEMY_SHEET.sprites, name, x, y, width, height, rotation);
+  }
+
   drawSheetSprite(sheet, sprites, name, x, y, width, height, rotation = 0) {
     if (!sheet.ready) return false;
     const sprite = sprites[name];
@@ -833,41 +878,119 @@ function numericId(id) {
     .reduce((total, char) => total + char.charCodeAt(0), 0);
 }
 
+function enemySpriteName(enemy) {
+  if (enemy.type === "drone") return "enemyDrone";
+  if (enemy.type === "bruiser") return "enemyBruiser";
+  if (enemy.type === "splitter") return "enemySplitter";
+  if (enemy.type === "stalker") return "enemyStalker";
+  if (enemy.type === "spitter") return "enemySpitter";
+  if (enemy.type === "bulwark") return "enemyBulwark";
+  if (enemy.type === "shard") return "enemyShard";
+  return null;
+}
+
 function enemyDrawWidth(enemy) {
+  if (enemy.type === "bulwark") return 58;
   if (enemy.type === "bruiser") return 62;
   if (enemy.type === "splitter") return 48;
+  if (enemy.type === "spitter") return 44;
+  if (enemy.type === "stalker") return 38;
   if (enemy.type === "shard") return 28;
   return 42;
 }
 
 function enemyDrawHeight(enemy) {
+  if (enemy.type === "bulwark") return 58;
   if (enemy.type === "bruiser") return 68;
   if (enemy.type === "splitter") return 46;
+  if (enemy.type === "spitter") return 42;
+  if (enemy.type === "stalker") return 44;
   if (enemy.type === "shard") return 25;
   return 37;
 }
 
 function enemyFillColor(enemy) {
+  if (enemy.type === "bulwark") return "#7c88ff";
   if (enemy.type === "bruiser") return "#ab5cff";
+  if (enemy.type === "stalker") return "#36f0b8";
+  if (enemy.type === "spitter") return "#d7ff57";
   if (enemy.type === "splitter") return "#ff9a3d";
   if (enemy.type === "shard") return "#ffcf57";
   return "#ff5b79";
 }
 
 function enemyGlowColor(enemy) {
-  if (enemy.eliteAffix === "armored") return "rgba(140, 245, 255, 0.28)";
-  if (enemy.eliteAffix === "swift") return "rgba(255, 211, 92, 0.28)";
+  if (enemy.affixes?.includes("volatile")) return "rgba(255, 91, 121, 0.32)";
+  if (enemy.affixes?.includes("regenerating")) return "rgba(60, 255, 148, 0.28)";
+  if (enemy.affixes?.includes("armored") || enemy.eliteAffix === "armored") return "rgba(140, 245, 255, 0.28)";
+  if (enemy.affixes?.includes("hasted") || enemy.eliteAffix === "swift") return "rgba(255, 211, 92, 0.28)";
+  if (enemy.type === "bulwark") return "rgba(124, 136, 255, 0.24)";
   if (enemy.type === "bruiser") return "rgba(184, 108, 255, 0.22)";
+  if (enemy.type === "stalker") return "rgba(54, 240, 184, 0.2)";
+  if (enemy.type === "spitter") return "rgba(215, 255, 87, 0.2)";
   if (enemy.type === "splitter" || enemy.type === "shard") return "rgba(255, 154, 61, 0.24)";
   return "rgba(255, 75, 111, 0.22)";
 }
 
 function enemyGlowRadius(enemy) {
-  if (enemy.eliteAffix) return enemy.type === "bruiser" ? 92 : 66;
+  if (enemy.affixes?.length || enemy.eliteAffix) return enemy.type === "bruiser" || enemy.type === "bulwark" ? 98 : 70 + (enemy.affixes?.length ?? 1) * 8;
+  if (enemy.type === "bulwark") return 82;
   if (enemy.type === "bruiser") return 76;
   if (enemy.type === "splitter") return 58;
+  if (enemy.type === "stalker" || enemy.type === "spitter") return 52;
   if (enemy.type === "shard") return 36;
   return 48;
+}
+
+function affixAuraStyle(affix) {
+  const styles = {
+    hasted: {
+      stroke: "rgba(255, 211, 92, 0.88)",
+      dot: "rgba(255, 244, 166, 0.92)",
+      dash: [8, 7],
+      dots: 3,
+      spin: 34,
+      pulse: 8,
+      dashDirection: 1,
+    },
+    swift: {
+      stroke: "rgba(255, 211, 92, 0.88)",
+      dot: "rgba(255, 244, 166, 0.92)",
+      dash: [8, 7],
+      dots: 3,
+      spin: 34,
+      pulse: 8,
+      dashDirection: 1,
+    },
+    armored: {
+      stroke: "rgba(140, 245, 255, 0.84)",
+      dot: "rgba(204, 255, 255, 0.92)",
+      dash: [],
+      dots: 4,
+      spin: 10,
+      pulse: 3,
+      dashDirection: -1,
+    },
+    regenerating: {
+      stroke: "rgba(60, 255, 148, 0.82)",
+      dot: "rgba(177, 255, 207, 0.92)",
+      dash: [3, 6],
+      dots: 5,
+      spin: 18,
+      pulse: 5,
+      dashDirection: -1,
+    },
+    volatile: {
+      stroke: "rgba(255, 91, 121, 0.88)",
+      dot: "rgba(255, 200, 87, 0.94)",
+      dash: [14, 4, 3, 4],
+      dots: 6,
+      spin: 24,
+      pulse: 11,
+      dashDirection: 1,
+    },
+  };
+  return styles[affix] ?? styles.hasted;
 }
 
 function normalizeVector(x, y) {

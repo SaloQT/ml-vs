@@ -9,3 +9,5 @@ dist/
 coverage/
 
 *.log
+ppo-model.json
+.claude/

@@ -24,10 +24,25 @@ const closeArmory = document.querySelector("#close-armory");
 const ppoPanel = document.querySelector("#ppo-panel");
 const closePpo = document.querySelector("#close-ppo");
 const startPpo = document.querySelector("#start-ppo");
+const watchPpo = document.querySelector("#watch-ppo");
+const ppoWatchFile = document.querySelector("#ppo-watch-file");
 const savePpo = document.querySelector("#save-ppo");
 const loadPpo = document.querySelector("#load-ppo");
 const ppoModelFile = document.querySelector("#ppo-model-file");
 const ppoAverageWindowInput = document.querySelector("#ppo-average-window");
+const ppoLrInput = document.querySelector("#ppo-lr");
+const ppoClipInput = document.querySelector("#ppo-clip");
+const ppoGammaInput = document.querySelector("#ppo-gamma");
+const ppoBatchInput = document.querySelector("#ppo-batch");
+const ppoGameLengthInput = document.querySelector("#ppo-game-length");
+const ppoWarmupInput = document.querySelector("#ppo-warmup");
+const ppoAdvClampInput = document.querySelector("#ppo-adv-clamp");
+const ppoKillRewardInput = document.querySelector("#ppo-kill-reward");
+const ppoXpRewardInput = document.querySelector("#ppo-xp-reward");
+const ppoPowerupRewardInput = document.querySelector("#ppo-powerup-reward");
+const ppoDmgTakenInput = document.querySelector("#ppo-dmg-taken");
+const ppoSurvivalBonusInput = document.querySelector("#ppo-survival-bonus");
+const ppoDeathPenaltyInput = document.querySelector("#ppo-death-penalty");
 const ppoGraphs = [...document.querySelectorAll("[data-ppo-chart]")];
 const closeOptions = document.querySelector("#close-options");
 const optionsPanel = document.querySelector("#options-panel");
@@ -42,11 +57,11 @@ const debugOverlay = document.querySelector("#debug-overlay");
 
 const visualOptions = loadVisualOptions();
 const renderer = new Renderer(canvas, visualOptions);
-const input = new InputController();
+const input = new InputController(canvas);
 let metaProgress = loadMetaProgress();
 let ppoTrainer = new PpoTrainer({ metaProgress });
 let simulation = createSimulation();
-let runStarted = false;
+let runMode = null; // "player" | "watch" | null
 let runRewardAwarded = false;
 let ppoRunning = false;
 
@@ -71,8 +86,36 @@ startRun.addEventListener("click", () => {
   accumulator = 0;
   lastTime = performance.now();
   resetDebugMeters();
-  runStarted = true;
+  runMode = "player";
   runRewardAwarded = false;
+  mainMenu.classList.add("hidden");
+  canvas.focus?.();
+});
+
+watchPpo.addEventListener("click", () => ppoWatchFile.click());
+
+ppoWatchFile.addEventListener("change", async () => {
+  const [file] = ppoWatchFile.files ?? [];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const model = JSON.parse(text);
+    ppoTrainer.importModel(model);
+    ppoTrainer.metaProgress = metaProgress;
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : "Unable to load PPO model.");
+    ppoWatchFile.value = "";
+    return;
+  }
+  ppoWatchFile.value = "";
+  simulation = new GameSimulation({ seed: 1337 + Math.floor(performance.now()), localPlayerId: "ppo", metaProgress });
+  accumulator = 0;
+  lastTime = performance.now();
+  resetDebugMeters();
+  runMode = "watch";
+  runRewardAwarded = false;
+  ppoRunning = false;
+  closePanel(ppoPanel, openPpo);
   mainMenu.classList.add("hidden");
   canvas.focus?.();
 });
@@ -96,9 +139,71 @@ loadPpo.addEventListener("click", () => ppoModelFile.click());
 ppoModelFile.addEventListener("change", loadPpoModel);
 
 ppoAverageWindowInput?.addEventListener("change", () => {
-  ppoGraphAverageWindow = clampInteger(ppoAverageWindowInput.value, 1, 50, 8);
+  ppoGraphAverageWindow = clampInteger(ppoAverageWindowInput.value, 1, 1000, 8);
   ppoAverageWindowInput.value = String(ppoGraphAverageWindow);
   renderPpoPanel();
+});
+
+ppoLrInput?.addEventListener("change", () => {
+  const v = parseFloat(ppoLrInput.value);
+  ppoTrainer.learningRate = Number.isFinite(v) && v > 0 ? v : 0.00004;
+  ppoLrInput.value = String(ppoTrainer.learningRate);
+});
+ppoClipInput?.addEventListener("change", () => {
+  const v = parseFloat(ppoClipInput.value);
+  ppoTrainer.clip = Number.isFinite(v) && v > 0 ? Math.min(v, 0.5) : 0.12;
+  ppoClipInput.value = String(ppoTrainer.clip);
+});
+ppoGammaInput?.addEventListener("change", () => {
+  const v = parseFloat(ppoGammaInput.value);
+  ppoTrainer.gamma = Number.isFinite(v) ? Math.max(0.9, Math.min(v, 1)) : 0.985;
+  ppoGammaInput.value = String(ppoTrainer.gamma);
+});
+ppoBatchInput?.addEventListener("change", () => {
+  ppoTrainer.batchSize = clampInteger(ppoBatchInput.value, 1, 32, 2);
+  ppoBatchInput.value = String(ppoTrainer.batchSize);
+});
+ppoGameLengthInput?.addEventListener("change", () => {
+  ppoTrainer.maxEpisodeSeconds = clampInteger(ppoGameLengthInput.value, 10, 300, 45);
+  ppoGameLengthInput.value = String(ppoTrainer.maxEpisodeSeconds);
+});
+ppoWarmupInput?.addEventListener("change", () => {
+  ppoTrainer.warmupSeconds = clampInteger(ppoWarmupInput.value, 0, 30, 3);
+  ppoWarmupInput.value = String(ppoTrainer.warmupSeconds);
+});
+
+function clampFloat(value, min, max, fallback) {
+  const v = parseFloat(value);
+  return Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : fallback;
+}
+
+ppoAdvClampInput?.addEventListener("change", () => {
+  ppoTrainer.advantageClamp = clampFloat(ppoAdvClampInput.value, 0.5, 10, 3);
+  ppoAdvClampInput.value = String(ppoTrainer.advantageClamp);
+});
+ppoKillRewardInput?.addEventListener("change", () => {
+  ppoTrainer.killReward = clampFloat(ppoKillRewardInput.value, 0, 50, 7.5);
+  ppoKillRewardInput.value = String(ppoTrainer.killReward);
+});
+ppoXpRewardInput?.addEventListener("change", () => {
+  ppoTrainer.xpReward = clampFloat(ppoXpRewardInput.value, 0, 5, 0.08);
+  ppoXpRewardInput.value = String(ppoTrainer.xpReward);
+});
+ppoPowerupRewardInput?.addEventListener("change", () => {
+  ppoTrainer.powerupReward = clampFloat(ppoPowerupRewardInput.value, 0, 20, 0.7);
+  ppoPowerupRewardInput.value = String(ppoTrainer.powerupReward);
+});
+ppoDmgTakenInput?.addEventListener("change", () => {
+  ppoTrainer.damageTakenPenalty = clampFloat(ppoDmgTakenInput.value, 0, 2, 0.16);
+  ppoDmgTakenInput.value = String(ppoTrainer.damageTakenPenalty);
+});
+ppoSurvivalBonusInput?.addEventListener("change", () => {
+  ppoTrainer.survivalBonus = clampFloat(ppoSurvivalBonusInput.value, 0, 0.5, 0.025);
+  ppoSurvivalBonusInput.value = String(ppoTrainer.survivalBonus);
+});
+ppoDeathPenaltyInput?.addEventListener("change", () => {
+  ppoTrainer.deathPenalty = clampFloat(ppoDeathPenaltyInput.value, 0, 200, 35);
+  ppoDeathPenaltyInput.value = String(ppoTrainer.deathPenalty);
 });
 
 optionsPanel.addEventListener("click", (event) => {
@@ -116,6 +221,10 @@ window.addEventListener("keydown", (event) => {
     closePanel(armoryPanel, openArmory);
   } else if (event.key === "Escape" && !ppoPanel.classList.contains("hidden")) {
     closePanel(ppoPanel, openPpo);
+  } else if (event.key === "Escape" && runMode === "watch") {
+    runMode = null;
+    mainMenu.classList.remove("hidden");
+    openPanel(ppoPanel, startPpo);
   }
 });
 
@@ -133,7 +242,7 @@ function frame(now) {
   lastTime = now;
   updateFps(now);
 
-  if (runStarted) {
+  if (runMode === "player") {
     accumulator += delta;
     simulation.applyInput(simulation.localPlayerId, input.sample());
     while (accumulator >= GAME.fixedStep) {
@@ -141,14 +250,28 @@ function frame(now) {
       accumulator -= GAME.fixedStep;
     }
     awardRunScrapIfNeeded();
+    if (simulation.state === "gameover") runMode = null;
+  } else if (runMode === "watch") {
+    accumulator += delta;
+    simulation.applyInput(simulation.localPlayerId, ppoTrainer.act(simulation));
+    while (accumulator >= GAME.fixedStep) {
+      simulation.step(GAME.fixedStep);
+      if (simulation.state === "upgrade") ppoTrainer.act(simulation);
+      accumulator -= GAME.fixedStep;
+    }
+    if (simulation.state === "gameover") {
+      simulation = new GameSimulation({ seed: 1337 + Math.floor(performance.now()), localPlayerId: "ppo", metaProgress });
+      accumulator = 0;
+      resetDebugMeters();
+    }
   } else if (ppoRunning && !ppoPanel.classList.contains("hidden")) {
-    ppoTrainer.trainBatch(2);
+    ppoTrainer.trainBatch();
     renderPpoPanel();
   }
 
-  const snapshot = runStarted ? simulation.getSnapshot() : menuSnapshot();
+  const snapshot = runMode ? simulation.getSnapshot() : menuSnapshot();
   renderer.render(snapshot);
-  syncUpgradePanel(snapshot, runStarted);
+  syncUpgradePanel(snapshot, runMode === "player");
   updateDebugOverlay(snapshot);
   requestAnimationFrame(frame);
 }
@@ -332,7 +455,13 @@ function renderArmory() {
       const row = document.createElement("div");
       row.className = "system-row";
       row.innerHTML = `
-        <strong>${upgrade.name} ${level}/${upgrade.maxLevel}</strong>
+        <div class="system-row-title">
+          <span class="equipment-sprite equipment-sprite-${upgrade.icon ?? upgrade.id}" aria-hidden="true"></span>
+          <div>
+            <strong>${upgrade.name} ${level}/${upgrade.maxLevel}</strong>
+            <span>Permanent</span>
+          </div>
+        </div>
         <p>${upgrade.description}</p>
         <button type="button" ${level >= upgrade.maxLevel || metaProgress.scrap < cost ? "disabled" : ""}>
           ${level >= upgrade.maxLevel ? "Maxed" : `Upgrade ${cost}`}
@@ -357,8 +486,11 @@ function renderArmory() {
       group.className = "equipment-slot";
       group.innerHTML = `
         <div class="equipment-slot-header">
-          <span>${EQUIPMENT_SLOTS[slot] ?? slot}</span>
-          <strong>${currentItem.name}</strong>
+          <span class="equipment-sprite equipment-sprite-${currentItem.icon ?? currentItem.id}" aria-hidden="true"></span>
+          <div>
+            <span>${EQUIPMENT_SLOTS[slot] ?? slot}</span>
+            <strong>${currentItem.name}</strong>
+          </div>
         </div>
       `;
       const choices = document.createElement("div");
@@ -370,8 +502,11 @@ function renderArmory() {
           row.className = `system-row equipment-row${selected ? " equipped" : ""}`;
           row.innerHTML = `
             <div class="equipment-row-title">
-              <strong>${item.name}</strong>
-              <span>${selected ? "Current" : EQUIPMENT_SLOTS[slot] ?? slot}</span>
+              <span class="equipment-sprite equipment-sprite-${item.icon ?? item.id}" aria-hidden="true"></span>
+              <div>
+                <strong>${item.name}</strong>
+                <span>${selected ? "Current" : EQUIPMENT_SLOTS[slot] ?? slot}</span>
+              </div>
             </div>
             <p>${item.description}</p>
             <ul>${item.effects.map((effect) => `<li>${effect}</li>`).join("")}</ul>
@@ -414,7 +549,7 @@ function drawPpoGraph(history) {
     { key: "score", label: "Score", color: "#64d9ff", suffix: "" },
     { key: "damage", label: "Damage", color: "#ff5b79", suffix: "" },
     { key: "kills", label: "Kills", color: "#ffc857", suffix: "" },
-    { key: "deathRate", label: "Death", color: "#b86cff", suffix: "%", invert: true },
+    { key: "deathRate", label: "Death", color: "#b86cff", suffix: "%" },
   ];
   for (const chart of charts) {
     const canvas = ppoGraphs.find((item) => item.dataset.ppoChart === chart.key);
@@ -493,10 +628,16 @@ function drawAverageReferenceLine(ctx, average, chart, width, height, min, max) 
 }
 
 function rollingAverage(values, windowSize) {
-  return values.map((_, index) => {
-    const start = Math.max(0, index - windowSize + 1);
-    return mean(values.slice(start, index + 1));
-  });
+  if (values.length < windowSize) return [];
+  const out = new Array(values.length - windowSize + 1);
+  let sum = 0;
+  for (let i = 0; i < windowSize; i += 1) sum += values[i];
+  out[0] = sum / windowSize;
+  for (let i = windowSize; i < values.length; i += 1) {
+    sum += values[i] - values[i - windowSize];
+    out[i - windowSize + 1] = sum / windowSize;
+  }
+  return out;
 }
 
 function mean(values) {
@@ -560,4 +701,93 @@ function syncUpgradePanel(snapshot, active) {
   upgradeOptions.querySelector("button")?.focus();
 }
 
+initPpoSpinners();
+initPpoTooltips();
 requestAnimationFrame(frame);
+
+function initPpoSpinners() {
+  const inputs = document.querySelectorAll(".ppo-param-pill input, .ppo-average-control input, .ppo-sidebar-row input");
+  for (const input of inputs) {
+    const step = parseFloat(input.step) || 1;
+    const min = input.min !== "" ? parseFloat(input.min) : -Infinity;
+    const max = input.max !== "" ? parseFloat(input.max) : Infinity;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "ppo-spinner";
+
+    const dec = document.createElement("button");
+    dec.type = "button";
+    dec.className = "ppo-spinner-btn";
+    dec.textContent = "−";
+    dec.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      nudge(input, -step, min, max);
+    });
+
+    const inc = document.createElement("button");
+    inc.type = "button";
+    inc.className = "ppo-spinner-btn";
+    inc.textContent = "+";
+    inc.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      nudge(input, +step, min, max);
+    });
+
+    input.parentNode.insertBefore(wrapper, input);
+    wrapper.appendChild(dec);
+    wrapper.appendChild(input);
+    wrapper.appendChild(inc);
+  }
+}
+
+function nudge(input, delta, min, max) {
+  const decimals = (String(input.step).split(".")[1] ?? "").length;
+  const current = parseFloat(input.value) || 0;
+  const next = Math.max(min, Math.min(max, current + delta));
+  input.value = decimals > 0 ? next.toFixed(decimals) : String(next);
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function initPpoTooltips() {
+  const rows = document.querySelectorAll(".ppo-sidebar-row[data-tooltip-title]");
+  if (!rows.length) return;
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "ppo-tooltip";
+  tooltip.role = "tooltip";
+  tooltip.innerHTML = "<strong></strong><span></span>";
+  document.body.append(tooltip);
+
+  for (const row of rows) {
+    row.addEventListener("mouseenter", () => showPpoTooltip(row, tooltip));
+    row.addEventListener("mousemove", () => positionPpoTooltip(row, tooltip));
+    row.addEventListener("mouseleave", () => hidePpoTooltip(tooltip));
+    row.addEventListener("focusin", () => showPpoTooltip(row, tooltip));
+    row.addEventListener("focusout", () => hidePpoTooltip(tooltip));
+  }
+}
+
+function showPpoTooltip(row, tooltip) {
+  tooltip.querySelector("strong").textContent = row.dataset.tooltipTitle ?? "";
+  tooltip.querySelector("span").textContent = row.dataset.tooltipBody ?? "";
+  tooltip.classList.add("visible");
+  positionPpoTooltip(row, tooltip);
+}
+
+function hidePpoTooltip(tooltip) {
+  tooltip.classList.remove("visible");
+}
+
+function positionPpoTooltip(row, tooltip) {
+  const rect = row.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const gap = 10;
+  const roomRight = window.innerWidth - rect.right;
+  const left =
+    roomRight >= tooltipRect.width + gap
+      ? rect.right + gap
+      : Math.max(14, rect.left - tooltipRect.width - gap);
+  const top = Math.max(14, Math.min(window.innerHeight - tooltipRect.height - 14, rect.top - 4));
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}

@@ -1,23 +1,23 @@
 export const META_STORAGE_KEY = "space-survivors-meta";
 
 export const PERMANENT_UPGRADES = [
-  permanent("reinforced-hull", "Reinforced Hull", "Start each run with more max hull.", 5, 85, (level, player) => {
+  permanent("reinforced-hull", "Reinforced Hull", "Start each run with more max hull.", 5, 85, "reinforced-hull", (level, player) => {
     player.stats.maxHp += level * 8;
     player.hp = player.stats.maxHp;
   }),
-  permanent("reactor-tuning", "Reactor Tuning", "Small permanent fire-rate increase.", 5, 110, (level, player) => {
+  permanent("reactor-tuning", "Reactor Tuning", "Small permanent fire-rate increase.", 5, 110, "reactor-tuning", (level, player) => {
     player.stats.fireRate *= 1 + level * 0.035;
   }),
-  permanent("combat-drills", "Combat Drills", "Small permanent damage increase.", 5, 120, (level, player) => {
+  permanent("combat-drills", "Combat Drills", "Small permanent damage increase.", 5, 120, "combat-drills", (level, player) => {
     player.stats.damage *= 1 + level * 0.04;
   }),
-  permanent("nav-school", "Nav School", "Start runs with better thruster calibration.", 4, 95, (level, player) => {
+  permanent("nav-school", "Nav School", "Start runs with better thruster calibration.", 4, 95, "nav-school", (level, player) => {
     player.stats.speed *= 1 + level * 0.025;
   }),
-  permanent("scrap-charter", "Scrap Charter", "Earn more permanent scrap from runs.", 5, 140, (level, player) => {
+  permanent("scrap-charter", "Scrap Charter", "Earn more permanent scrap from runs.", 5, 140, "scrap-charter", (level, player) => {
     player.stats.salvageBonus += level * 0.05;
   }),
-  permanent("field-medicine", "Field Medicine", "Repair drops restore more hull.", 4, 130, (level, player) => {
+  permanent("field-medicine", "Field Medicine", "Repair drops restore more hull.", 4, 130, "field-medicine", (level, player) => {
     player.stats.repairDropBonus += level * 0.025;
   }),
 ];
@@ -30,30 +30,30 @@ export const EQUIPMENT_SLOTS = {
 
 export const EQUIPMENT = {
   weapon: [
-    equipment("pulse-laser", "Pulse Laser", "Balanced automatic plasma fire.", "weapon", ["Baseline damage and cadence"], (player) => {
+    equipment("pulse-laser", "Pulse Laser", "Balanced automatic plasma fire.", "weapon", "pulse-laser", ["Baseline damage and cadence"], (player) => {
       player.stats.damage *= 1;
     }),
-    equipment("rail-cannon", "Rail Cannon", "Harder hits, slower cadence.", "weapon", ["+35% damage", "-24% fire rate", "+18% projectile speed"], (player) => {
+    equipment("rail-cannon", "Rail Cannon", "Harder hits, slower cadence.", "weapon", "rail-cannon", ["+35% damage", "-24% fire rate", "+18% projectile speed"], (player) => {
       player.stats.damage *= 1.35;
       player.stats.fireRate *= 0.76;
       player.stats.projectileSpeed *= 1.18;
     }),
-    equipment("scatter-core", "Scatter Core", "Extra projectile, weaker shots.", "weapon", ["+1 projectile", "-22% damage", "-10% fire rate"], (player) => {
+    equipment("scatter-core", "Scatter Core", "Extra projectile, weaker shots.", "weapon", "scatter-core", ["+1 projectile", "-22% damage", "-10% fire rate"], (player) => {
       player.stats.projectiles += 1;
       player.stats.damage *= 0.78;
       player.stats.fireRate *= 0.9;
     }),
-    equipment("coil-repeater", "Coil Repeater", "Rapid cycling coils with lighter impact.", "weapon", ["+28% fire rate", "-12% damage", "-8% projectile speed"], (player) => {
+    equipment("coil-repeater", "Coil Repeater", "Rapid cycling coils with lighter impact.", "weapon", "coil-repeater", ["+28% fire rate", "-12% damage", "-8% projectile speed"], (player) => {
       player.stats.fireRate *= 1.28;
       player.stats.damage *= 0.88;
       player.stats.projectileSpeed *= 0.92;
     }),
-    equipment("ion-lance", "Ion Lance", "Precision beam tuned for critical strikes.", "weapon", ["+10% crit chance", "+35% crit damage", "-12% fire rate"], (player) => {
+    equipment("ion-lance", "Ion Lance", "Precision beam tuned for critical strikes.", "weapon", "ion-lance", ["+10% crit chance", "+35% crit damage", "-12% fire rate"], (player) => {
       player.stats.critChance += 0.1;
       player.stats.critDamage += 0.35;
       player.stats.fireRate *= 0.88;
     }),
-    equipment("flak-array", "Flak Array", "Wide blast pattern for close-range swarms.", "weapon", ["+1 projectile", "+18% area", "-16% damage", "-12% projectile speed"], (player) => {
+    equipment("flak-array", "Flak Array", "Wide blast pattern for close-range swarms.", "weapon", "flak-array", ["+1 projectile", "+18% area", "-16% damage", "-12% projectile speed"], (player) => {
       player.stats.projectiles += 1;
       player.stats.area *= 1.18;
       player.stats.damage *= 0.84;
@@ -61,32 +61,32 @@ export const EQUIPMENT = {
     }),
   ],
   hull: [
-    equipment("scout-frame", "Scout Frame", "Fast frame with lighter plating.", "hull", ["+8% speed", "-10 max hull"], (player) => {
+    equipment("scout-frame", "Scout Frame", "Fast frame with lighter plating.", "hull", "scout-frame", ["+8% speed", "-10 max hull"], (player) => {
       player.stats.speed *= 1.08;
       player.stats.maxHp -= 10;
       player.hp = Math.min(player.hp, player.stats.maxHp);
     }),
-    equipment("bulwark-frame", "Bulwark Frame", "Heavy frame with armor and hull.", "hull", ["+28 max hull", "+3 armor", "-8% speed"], (player) => {
+    equipment("bulwark-frame", "Bulwark Frame", "Heavy frame with armor and hull.", "hull", "bulwark-frame", ["+28 max hull", "+3 armor", "-8% speed"], (player) => {
       player.stats.maxHp += 28;
       player.stats.armor += 3;
       player.stats.speed *= 0.92;
       player.hp = player.stats.maxHp;
     }),
-    equipment("standard-frame", "Standard Frame", "Reliable starter hull.", "hull", ["No stat tradeoffs"], () => {}),
-    equipment("interceptor-frame", "Interceptor Frame", "Stripped pursuit frame for aggressive piloting.", "hull", ["+14% speed", "+8% fire rate", "-22 max hull"], (player) => {
+    equipment("standard-frame", "Standard Frame", "Reliable starter hull.", "hull", "standard-frame", ["No stat tradeoffs"], () => {}),
+    equipment("interceptor-frame", "Interceptor Frame", "Stripped pursuit frame for aggressive piloting.", "hull", "interceptor-frame", ["+14% speed", "+8% fire rate", "-22 max hull"], (player) => {
       player.stats.speed *= 1.14;
       player.stats.fireRate *= 1.08;
       player.stats.maxHp -= 22;
       player.hp = Math.min(player.hp, player.stats.maxHp);
     }),
-    equipment("aegis-frame", "Aegis Frame", "Dense plating with redundant repair channels.", "hull", ["+18 max hull", "+2 armor", "+6% repair drops", "-5% speed"], (player) => {
+    equipment("aegis-frame", "Aegis Frame", "Dense plating with redundant repair channels.", "hull", "aegis-frame", ["+18 max hull", "+2 armor", "+6% repair drops", "-5% speed"], (player) => {
       player.stats.maxHp += 18;
       player.stats.armor += 2;
       player.stats.repairDropBonus += 0.06;
       player.stats.speed *= 0.95;
       player.hp = player.stats.maxHp;
     }),
-    equipment("reactor-frame", "Reactor Frame", "Expanded reactor bay that trades shielding for output.", "hull", ["+16% damage", "+10% fire rate", "-16 max hull", "-1 armor"], (player) => {
+    equipment("reactor-frame", "Reactor Frame", "Expanded reactor bay that trades shielding for output.", "hull", "reactor-frame", ["+16% damage", "+10% fire rate", "-16 max hull", "-1 armor"], (player) => {
       player.stats.damage *= 1.16;
       player.stats.fireRate *= 1.1;
       player.stats.maxHp -= 16;
@@ -95,27 +95,27 @@ export const EQUIPMENT = {
     }),
   ],
   utility: [
-    equipment("magnet-rig", "Magnet Rig", "Improved pickup range.", "utility", ["+38 pickup radius"], (player) => {
+    equipment("magnet-rig", "Magnet Rig", "Improved pickup range.", "utility", "magnet-rig", ["+38 pickup radius"], (player) => {
       player.stats.pickupRadius += 38;
     }),
-    equipment("targeting-suite", "Targeting Suite", "Better critical chance.", "utility", ["+8% crit chance"], (player) => {
+    equipment("targeting-suite", "Targeting Suite", "Better critical chance.", "utility", "targeting-suite", ["+8% crit chance"], (player) => {
       player.stats.critChance += 0.08;
     }),
-    equipment("repair-cache", "Repair Cache", "More repair drops, less XP gain.", "utility", ["+8% repair drops", "-6% XP gain"], (player) => {
+    equipment("repair-cache", "Repair Cache", "More repair drops, less XP gain.", "utility", "repair-cache", ["+8% repair drops", "-6% XP gain"], (player) => {
       player.stats.repairDropBonus += 0.08;
       player.stats.xpGain *= 0.94;
     }),
-    equipment("salvage-net", "Salvage Net", "Scrap reclamation rig with a wider collection field.", "utility", ["+10% salvage", "+20 pickup radius", "-4% speed"], (player) => {
+    equipment("salvage-net", "Salvage Net", "Scrap reclamation rig with a wider collection field.", "utility", "salvage-net", ["+10% salvage", "+20 pickup radius", "-4% speed"], (player) => {
       player.stats.salvageBonus += 0.1;
       player.stats.pickupRadius += 20;
       player.stats.speed *= 0.96;
     }),
-    equipment("overclock-relay", "Overclock Relay", "Pushes weapon power at the cost of repairs.", "utility", ["+9% damage", "+9% fire rate", "-5% repair drops"], (player) => {
+    equipment("overclock-relay", "Overclock Relay", "Pushes weapon power at the cost of repairs.", "utility", "overclock-relay", ["+9% damage", "+9% fire rate", "-5% repair drops"], (player) => {
       player.stats.damage *= 1.09;
       player.stats.fireRate *= 1.09;
       player.stats.repairDropBonus -= 0.05;
     }),
-    equipment("stabilizer-vanes", "Stabilizer Vanes", "Tighter flight and faster rounds with less draw range.", "utility", ["+6% speed", "+10% projectile speed", "-18 pickup radius"], (player) => {
+    equipment("stabilizer-vanes", "Stabilizer Vanes", "Tighter flight and faster rounds with less draw range.", "utility", "stabilizer-vanes", ["+6% speed", "+10% projectile speed", "-18 pickup radius"], (player) => {
       player.stats.speed *= 1.06;
       player.stats.projectileSpeed *= 1.1;
       player.stats.pickupRadius -= 18;
@@ -192,10 +192,10 @@ export function calculateRunScrap(snapshot) {
   return Math.max(8, Math.floor(raw * (1 + bonus)));
 }
 
-function permanent(id, name, description, maxLevel, baseCost, apply) {
-  return { id, name, description, maxLevel, baseCost, apply };
+function permanent(id, name, description, maxLevel, baseCost, icon, apply) {
+  return { id, name, description, maxLevel, baseCost, icon, apply };
 }
 
-function equipment(id, name, description, slot, effects, apply) {
-  return { id, name, description, slot, effects, apply };
+function equipment(id, name, description, slot, icon, effects, apply) {
+  return { id, name, description, slot, icon, effects, apply };
 }

@@ -55,6 +55,7 @@ export function createPlayer(id, x = 0, y = 0) {
 
 export function createEnemy(id, type, x, y, wave, options = {}) {
   const stats = enemyStats(type, wave);
+  const affixes = normalizeAffixes(options);
   const enemy = {
     id,
     kind: "enemy",
@@ -70,19 +71,36 @@ export function createEnemy(id, type, x, y, wave, options = {}) {
     splitCount: stats.splitCount,
     splitChildType: stats.splitChildType,
     splitDepth: options.splitDepth ?? 0,
+    affixes: [],
+    rarity: affixes.length > 1 ? "rare" : affixes.length === 1 ? "elite" : "normal",
+    armor: 0,
+    regenPerSecond: 0,
+    volatileDamage: 0,
+    volatileRadius: 0,
     hitFlash: 0,
     hitVx: 0,
     hitVy: 0,
   };
 
-  if (options.eliteAffix) {
-    applyEliteAffix(enemy, options.eliteAffix);
-  }
+  for (const affix of affixes) applyEnemyAffix(enemy, affix);
+  enemy.eliteAffix = enemy.affixes[0] ?? null;
 
   return enemy;
 }
 
 function enemyStats(type, wave) {
+  if (type === "stalker") {
+    const hp = 18 + wave * 3;
+    return { radius: 13, hp, speed: 138 + wave * 4, damage: 9, xp: 3, splitCount: 0, splitChildType: null };
+  }
+  if (type === "bulwark") {
+    const hp = 82 + wave * 10;
+    return { radius: 25, hp, speed: 52 + wave * 2, damage: 18, xp: 7, splitCount: 0, splitChildType: null };
+  }
+  if (type === "spitter") {
+    const hp = 28 + wave * 4;
+    return { radius: 16, hp, speed: 76 + wave * 2, damage: 11, xp: 4, splitCount: 0, splitChildType: null };
+  }
   if (type === "bruiser") {
     const hp = 56 + wave * 8;
     return { radius: 22, hp, speed: 68 + wave * 3, damage: 14, xp: 5, splitCount: 0, splitChildType: null };
@@ -100,23 +118,42 @@ function enemyStats(type, wave) {
   return { radius: 15, hp, speed: 96 + wave * 3, damage: 7, xp: 2, splitCount: 0, splitChildType: null };
 }
 
-function applyEliteAffix(enemy, eliteAffix) {
-  enemy.eliteAffix = eliteAffix;
+function normalizeAffixes(options) {
+  const affixes = Array.isArray(options.affixes) ? options.affixes : options.eliteAffix ? [options.eliteAffix] : [];
+  return [...new Set(affixes.filter(Boolean).map((affix) => (affix === "swift" ? "hasted" : affix)))];
+}
+
+function applyEnemyAffix(enemy, affix) {
+  enemy.affixes.push(affix);
   enemy.radius += 3;
   enemy.xp += 3;
 
-  if (eliteAffix === "swift") {
-    enemy.speed *= 1.32;
+  if (affix === "hasted") {
+    enemy.speed *= 1.36;
     enemy.damage += 3;
     enemy.strafePhase = 0;
     return;
   }
 
-  if (eliteAffix === "armored") {
-    enemy.maxHp = Math.round(enemy.maxHp * 1.7);
+  if (affix === "armored") {
+    enemy.maxHp = Math.round(enemy.maxHp * 1.65);
     enemy.hp = enemy.maxHp;
-    enemy.armor = 6;
+    enemy.armor += 6;
     enemy.speed *= 0.88;
+    return;
+  }
+
+  if (affix === "regenerating") {
+    enemy.maxHp = Math.round(enemy.maxHp * 1.28);
+    enemy.hp = enemy.maxHp;
+    enemy.regenPerSecond += 3.5;
+    return;
+  }
+
+  if (affix === "volatile") {
+    enemy.damage += 4;
+    enemy.volatileDamage += 14;
+    enemy.volatileRadius = Math.max(enemy.volatileRadius, 112);
   }
 }
 

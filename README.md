@@ -27,7 +27,7 @@ Default targeting lives in `src/config.js`:
 export const TARGETING = {
   primaryWeapon: {
     strategy: "nearest",
-    enemyTypes: ["drone", "bruiser", "splitter", "shard"],
+    enemyTypes: ["drone", "bruiser", "splitter", "shard", "stalker", "bulwark", "spitter"],
     maxRange: 1200,
     firingAngleDegrees: 8,
   },
@@ -79,7 +79,7 @@ npm run ppo:benchmark -- --batches=6 --batch-size=4
 ## Run Mechanics
 
 - Weapon upgrades now include piercing Phase Lance bolts and Arc Conductor chain lightning.
-- Enemy waves can include splitters that burst into shards, plus swift and armored elite affixes at later waves.
+- Enemy waves can include splitters that burst into shards, stalkers, spitters, and bulwarks. Later waves add elite and rare monsters with stackable hasted, armored, regenerating, and volatile affixes; each affix has its own aura treatment.
 - Drops include XP, repair, scrap, shield, overdrive, magnet burst, and rare cache pickups.
 
 ## Economy Balance Script

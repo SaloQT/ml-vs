@@ -2,6 +2,8 @@ const SHEET_WIDTH = 1254;
 const SHEET_HEIGHT = 1254;
 const SHEET_COLUMNS = 4;
 const SHEET_ROWS = 2;
+const ENEMY_SHEET_CELL_WIDTH = 397;
+const ENEMY_SHEET_HEIGHT = 793;
 
 export const SPRITE_SHEET = {
   src: "./assets/space-survivors-sprites.png",
@@ -18,6 +20,21 @@ export const SPRITE_SHEET = {
     orbitalDrone: rect(374, 691, 202, 214),
     shieldPickup: rect(679, 693, 261, 223),
     gravityWell: rect(940, 647, 281, 295),
+  },
+};
+
+export const ENEMY_SHEET = {
+  src: "./assets/enemy-sprites/missing-enemies.png",
+  width: ENEMY_SHEET_CELL_WIDTH * 5,
+  height: ENEMY_SHEET_HEIGHT,
+  columns: 5,
+  rows: 1,
+  sprites: {
+    enemySplitter: rect(69, 195, 328, 367),
+    enemyStalker: rect(397, 208, 397, 359),
+    enemySpitter: rect(794, 204, 380, 365),
+    enemyBulwark: rect(1250, 207, 338, 360),
+    enemyShard: rect(1588, 289, 272, 266),
   },
 };
 
@@ -41,6 +58,10 @@ export const UI_SHEET = {
 
 export function loadSpriteSheet() {
   return loadSheet(SPRITE_SHEET);
+}
+
+export function loadEnemySheet() {
+  return loadSheet(ENEMY_SHEET);
 }
 
 export function loadUiSheet() {

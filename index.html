@@ -72,6 +72,7 @@
         </div>
 
         <div id="ppo-panel" class="systems-panel hidden" role="dialog" aria-modal="true" aria-labelledby="ppo-title">
+          <div class="ppo-layout">
           <div class="systems-card wide">
             <div class="options-title">
               <span>Policy Training</span>
@@ -85,6 +86,14 @@
               <div><strong id="ppo-damage">0</strong><small>Damage</small></div>
               <div><strong id="ppo-death">0%</strong><small>Death</small></div>
             </div>
+            <div class="ppo-graphs-header">
+              <span class="ppo-graphs-title">Training Graphs</span>
+              <div class="ppo-average-control">
+                <span class="ppo-average-label">Smoothing</span>
+                <input id="ppo-average-window" type="number" min="1" max="1000" step="1" value="8" aria-label="PPO graph average iterations" />
+                <span class="ppo-average-suffix">iters</span>
+              </div>
+            </div>
             <div class="ppo-graphs" aria-label="PPO training graphs">
               <canvas data-ppo-chart="score" width="360" height="170" aria-label="PPO score graph"></canvas>
               <canvas data-ppo-chart="damage" width="360" height="170" aria-label="PPO damage graph"></canvas>
@@ -92,16 +101,36 @@
               <canvas data-ppo-chart="deathRate" width="360" height="170" aria-label="PPO death rate graph"></canvas>
             </div>
             <div class="options-actions">
-              <label class="ppo-average-control">
-                <span>Avg</span>
-                <input id="ppo-average-window" type="number" min="1" max="50" step="1" value="8" aria-label="PPO graph average iterations" />
-              </label>
-              <button id="start-ppo" type="button">Start</button>
+              <button id="start-ppo" type="button" class="action-primary">Start</button>
+              <button id="watch-ppo" type="button">Watch</button>
+              <input id="ppo-watch-file" class="file-input-hidden" type="file" accept="application/json,.json" />
               <button id="save-ppo" type="button">Save Model</button>
               <button id="load-ppo" type="button">Load Model</button>
               <input id="ppo-model-file" class="file-input-hidden" type="file" accept="application/json,.json" />
               <button id="close-ppo" type="button">Back</button>
             </div>
+          </div>
+          <aside class="ppo-sidebar" aria-label="Hyperparameters">
+            <div class="ppo-sidebar-section">
+              <h3 class="ppo-sidebar-heading">Optimisation</h3>
+              <div class="ppo-sidebar-row" data-tooltip-title="Learning Rate" data-tooltip-body="Controls how much each PPO update changes the policy weights. Example: 0.00004 makes small steady changes; 0.001 learns faster but can destabilize movement and upgrade choices."><span>Learning Rate</span><input id="ppo-lr" type="number" min="0.000001" max="0.01" step="0.000001" value="0.00004" aria-label="Learning rate" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Clip Epsilon" data-tooltip-body="Limits how far a PPO update can push action probabilities from the previous policy. Example: 0.12 keeps updates conservative; 0.3 allows bigger jumps but can forget useful behavior."><span>Clip &epsilon;</span><input id="ppo-clip" type="number" min="0.01" max="0.5" step="0.01" value="0.12" aria-label="Clip epsilon" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Gamma" data-tooltip-body="Discounts future rewards when scoring decisions. Example: 0.985 makes the agent value survival and upgrade payoffs many seconds later; 0.9 focuses more on immediate kills and damage."><span>Gamma</span><input id="ppo-gamma" type="number" min="0.9" max="1" step="0.001" value="0.985" aria-label="Discount factor" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Batch Size" data-tooltip-body="Episodes simulated before one policy update. Example: 2 updates quickly for interactive tuning; 16 gives smoother gradients but each training step takes longer."><span>Batch Size</span><input id="ppo-batch" type="number" min="1" max="32" step="1" value="2" aria-label="Episodes per update" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Game Length" data-tooltip-body="Maximum simulated seconds per training episode. Example: 45 trains short survival runs quickly; 120 lets the policy learn later waves and long-term upgrade value."><span>Game Length</span><input id="ppo-game-length" type="number" min="10" max="300" step="5" value="45" aria-label="PPO game length seconds" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Warmup" data-tooltip-body="Initial simulated seconds excluded from PPO rewards, policy updates, and batch stats. Example: 3 lets early enemy spawning settle before score, damage, kills, and death graphs start counting."><span>Warmup</span><input id="ppo-warmup" type="number" min="0" max="30" step="1" value="3" aria-label="PPO warmup seconds" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Advantage Clamp" data-tooltip-body="Caps how strongly unusually good or bad moments affect the update. Example: 3 prevents one lucky run from dominating; 8 lets rare high-value events push harder."><span>Adv. Clamp</span><input id="ppo-adv-clamp" type="number" min="0.5" max="10" step="0.5" value="3" aria-label="Advantage clamp" /></div>
+            </div>
+            <div class="ppo-sidebar-section">
+              <h3 class="ppo-sidebar-heading">Rewards</h3>
+              <div class="ppo-sidebar-row" data-tooltip-title="Kill Reward" data-tooltip-body="Reward added when the agent kills an enemy. Example: 7.5 encourages aggressive routing toward enemies; 2 makes survival and pickups matter more."><span>Kill</span><input id="ppo-kill-reward" type="number" min="0" max="50" step="0.5" value="7.5" aria-label="Kill reward" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="XP Reward" data-tooltip-body="Reward per XP core gained before level-up conversion. Example: 0.08 makes collecting nearby cores worthwhile; 0.25 strongly prioritizes pickup routing."><span>XP</span><input id="ppo-xp-reward" type="number" min="0" max="5" step="0.01" value="0.08" aria-label="XP reward" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Powerup Reward" data-tooltip-body="Reward when temporary pickups or shield/cache gains are collected. Example: 0.7 teaches the agent to detour for magnet, overdrive, shield, and cache pickups."><span>Powerups</span><input id="ppo-powerup-reward" type="number" min="0" max="20" step="0.1" value="0.7" aria-label="Powerup reward" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Damage Taken Penalty" data-tooltip-body="Penalty per hull damage taken. Example: 0.16 makes taking 10 damage cost 1.6 reward, pushing the policy away from collisions."><span>Dmg Taken</span><input id="ppo-dmg-taken" type="number" min="0" max="2" step="0.01" value="0.16" aria-label="Damage taken penalty" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Survival Bonus" data-tooltip-body="Small reward added each simulation tick while alive. Example: 0.025 rewards staying alive even before kills happen, reducing reckless early deaths."><span>Survival</span><input id="ppo-survival-bonus" type="number" min="0" max="0.5" step="0.005" value="0.025" aria-label="Survival tick bonus" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Death Penalty" data-tooltip-body="Final reward penalty when the episode ends in death. Example: 35 makes dying erase several kills worth of reward, so upgrade and movement choices value safety."><span>Death Penalty</span><input id="ppo-death-penalty" type="number" min="0" max="200" step="1" value="35" aria-label="Death penalty" /></div>
+            </div>
+          </aside>
           </div>
         </div>
 

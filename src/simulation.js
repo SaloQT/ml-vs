@@ -394,7 +394,7 @@ export class GameSimulation {
   }
 
   updateProjectiles(dt) {
-    for (const projectile of [...this.projectiles.values()]) {
+    for (const projectile of this.projectiles.values()) {
       projectile.x += projectile.vx * dt;
       projectile.y += projectile.vy * dt;
       projectile.ttl -= dt;
@@ -480,7 +480,7 @@ export class GameSimulation {
   }
 
   updateEffects(dt) {
-    for (const effect of [...this.effects.values()]) {
+    for (const effect of this.effects.values()) {
       effect.ttl -= dt;
       if (effect.ttl <= 0) this.effects.delete(effect.id);
     }
