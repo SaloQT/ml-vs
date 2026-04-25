@@ -9,6 +9,7 @@ export class GameSimulation {
   constructor({ seed = Date.now(), localPlayerId = "p1", targeting = {}, metaProgress = {} } = {}) {
     this.rng = new Rng(seed);
     this.targeting = createTargetingConfig(targeting);
+    this._targetingCache = buildTargetingCache(this.targeting.primaryWeapon);
     this.metaProgress = normalizeMetaProgress(metaProgress);
     this.localPlayerId = localPlayerId;
     this.tick = 0;
@@ -51,6 +52,7 @@ export class GameSimulation {
 
   setTargetingConfig(targeting) {
     this.targeting = mergeTargetingConfig(this.targeting, targeting);
+    this._targetingCache = buildTargetingCache(this.targeting.primaryWeapon);
   }
 
   step(dt) {
@@ -103,31 +105,71 @@ export class GameSimulation {
   }
 
   updatePlayers(dt) {
+    const worldRadius = GAME.worldRadius;
     for (const player of this.players.values()) {
       const input = this.inputs.get(player.id) ?? { moveX: 0, moveY: 0 };
-      const move = normalize(input.moveX, input.moveY);
+      const mx = input.moveX;
+      const my = input.moveY;
+      const moveLen = Math.hypot(mx, my);
+      const moveNx = moveLen ? mx / moveLen : 0;
+      const moveNy = moveLen ? my / moveLen : 0;
       player.overdriveFor = Math.max(0, (player.overdriveFor ?? 0) - dt);
       player.magnetBurstFor = Math.max(0, (player.magnetBurstFor ?? 0) - dt);
-      player.vx = move.x * this.playerSpeed(player);
-      player.vy = move.y * this.playerSpeed(player);
-      player.x = clamp(player.x + player.vx * dt, -GAME.worldRadius, GAME.worldRadius);
-      player.y = clamp(player.y + player.vy * dt, -GAME.worldRadius, GAME.worldRadius);
+      const speed = this.playerSpeed(player);
+      player.vx = moveNx * speed;
+      player.vy = moveNy * speed;
+      const newX = player.x + player.vx * dt;
+      const newY = player.y + player.vy * dt;
+      player.x = newX < -worldRadius ? -worldRadius : newX > worldRadius ? worldRadius : newX;
+      player.y = newY < -worldRadius ? -worldRadius : newY > worldRadius ? worldRadius : newY;
       player.invulnerableFor = Math.max(0, player.invulnerableFor - dt);
       player.cooldown -= dt;
       if (player.stats.regen > 0 && player.hp < player.stats.maxHp * 0.7) {
         player.hp = Math.min(player.stats.maxHp, player.hp + player.stats.regen * dt);
       }
-      this.updatePlayerFacing(player, dt);
 
-      if (player.cooldown <= 0 && this.canFirePrimaryWeapon(player)) {
-        this.fireVolley(player);
-        player.cooldown = 0.42 / this.playerFireRate(player);
+      const target = this._selectPrimaryTargetFast(player);
+      let aimDx;
+      let aimDy;
+      if (target) {
+        const dx = target.x - player.x;
+        const dy = target.y - player.y;
+        const len = Math.hypot(dx, dy);
+        if (len) {
+          aimDx = dx / len;
+          aimDy = dy / len;
+        } else {
+          aimDx = 0;
+          aimDy = 0;
+        }
+      } else {
+        aimDx = 1;
+        aimDy = 0;
+      }
+      const turnBlend = 1 - Math.exp(-10 * dt);
+      const facingX = player.facingX + (aimDx - player.facingX) * turnBlend;
+      const facingY = player.facingY + (aimDy - player.facingY) * turnBlend;
+      const facingLen = Math.hypot(facingX, facingY);
+      if (facingLen) {
+        player.facingX = facingX / facingLen || 1;
+        player.facingY = facingY / facingLen || 0;
+      } else {
+        player.facingX = 1;
+        player.facingY = 0;
+      }
+
+      if (player.cooldown <= 0 && target) {
+        const dot = player.facingX * aimDx + player.facingY * aimDy;
+        if (dot >= this._targetingCache.angleThreshold) {
+          this.fireVolley(player, { x: aimDx, y: aimDy });
+          player.cooldown = 0.42 / this.playerFireRate(player);
+        }
       }
     }
   }
 
-  fireVolley(player) {
-    const direction = normalize(player.facingX, player.facingY);
+  fireVolley(player, aimDirection = null) {
+    const direction = normalize(aimDirection?.x ?? player.facingX, aimDirection?.y ?? player.facingY);
     const spread = 0.18;
     const count = player.stats.projectiles;
     for (let i = 0; i < count; i += 1) {
@@ -177,13 +219,17 @@ export class GameSimulation {
   }
 
   canFirePrimaryWeapon(player) {
+    return Boolean(this.primaryWeaponAim(player));
+  }
+
+  primaryWeaponAim(player) {
     const target = this.primaryTargetFor(player);
-    if (!target) return false;
+    if (!target) return null;
     const targetDirection = normalize(target.x - player.x, target.y - player.y);
     const facing = normalize(player.facingX, player.facingY);
     const dot = facing.x * targetDirection.x + facing.y * targetDirection.y;
     const threshold = Math.cos((this.targeting.primaryWeapon.firingAngleDegrees * Math.PI) / 180);
-    return dot >= threshold;
+    return dot >= threshold ? { target, direction: targetDirection } : null;
   }
 
   updatePlayerFacing(player, dt) {
@@ -210,16 +256,30 @@ export class GameSimulation {
       const distance = this.rng.range(650, 900);
       const typeRoll = this.rng.next();
       const splitterChance = this.wave >= 2 ? Math.min(0.04 + this.wave * 0.008, 0.14) : 0;
+      const stalkerChance = this.wave >= 2 ? Math.min(0.05 + this.wave * 0.006, 0.13) : 0;
+      const spitterChance = this.wave >= 4 ? Math.min(0.035 + this.wave * 0.005, 0.1) : 0;
+      const bulwarkChance = this.wave >= 5 ? Math.min(0.025 + this.wave * 0.004, 0.08) : 0;
       const bruiserChance = Math.min(0.1 + this.wave * 0.015, 0.35);
-      const type = typeRoll < splitterChance ? "splitter" : typeRoll < splitterChance + bruiserChance ? "bruiser" : "drone";
-      const eliteAffix = this.rollEliteAffix();
+      const type =
+        typeRoll < splitterChance
+          ? "splitter"
+          : typeRoll < splitterChance + stalkerChance
+            ? "stalker"
+            : typeRoll < splitterChance + stalkerChance + spitterChance
+              ? "spitter"
+              : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance
+                ? "bulwark"
+                : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance + bruiserChance
+                  ? "bruiser"
+                  : "drone";
+      const affixes = this.rollEnemyAffixes();
       const enemy = createEnemy(
         this.entityId(),
         type,
         target.x + Math.cos(angle) * distance,
         target.y + Math.sin(angle) * distance,
         this.wave,
-        { eliteAffix },
+        { affixes },
       );
       this.enemies.set(enemy.id, enemy);
     }
@@ -227,43 +287,105 @@ export class GameSimulation {
   }
 
   rollEliteAffix() {
+    return this.rollEnemyAffixes()[0] ?? null;
+  }
+
+  rollEnemyAffixes() {
+    const rareChance = this.wave >= 6 ? Math.min(0.012 + this.wave * 0.003, 0.06) : 0;
     const eliteChance = this.wave >= 3 ? Math.min(0.035 + this.wave * 0.007, 0.12) : 0;
-    if (this.rng.next() >= eliteChance) return null;
-    return this.rng.next() < 0.5 ? "swift" : "armored";
+    if (this.rng.next() >= eliteChance + rareChance) return [];
+
+    const rareRoll = rareChance / Math.max(eliteChance + rareChance, 0.001);
+    const count = this.rng.next() < rareRoll ? (this.wave >= 10 ? 3 : 2) : 1;
+    const pool = ["hasted", "armored", "regenerating", "volatile"];
+    const affixes = [];
+    while (affixes.length < count && pool.length) {
+      const index = Math.floor(this.rng.next() * pool.length);
+      affixes.push(pool.splice(index, 1)[0]);
+    }
+    return affixes;
   }
 
   updateEnemies(dt) {
-    const alivePlayers = [...this.players.values()].filter((player) => player.hp > 0);
+    const alivePlayers = [];
+    for (const player of this.players.values()) {
+      if (player.hp > 0) alivePlayers.push(player);
+    }
+    if (!alivePlayers.length) return;
+    const singleTarget = alivePlayers.length === 1 ? alivePlayers[0] : null;
+    const decay = Math.pow(0.86, dt * 60);
     for (const enemy of this.enemies.values()) {
-      const target = this.nearestPlayer(enemy, alivePlayers);
+      let target = singleTarget;
+      if (!target) {
+        let best = Infinity;
+        for (let i = 0; i < alivePlayers.length; i += 1) {
+          const p = alivePlayers[i];
+          const dx = enemy.x - p.x;
+          const dy = enemy.y - p.y;
+          const d = dx * dx + dy * dy;
+          if (d < best) {
+            best = d;
+            target = p;
+          }
+        }
+      }
       if (!target) continue;
-      const direction = this.enemyMoveDirection(enemy, target, dt);
-      enemy.x += direction.x * enemy.speed * dt;
-      enemy.y += direction.y * enemy.speed * dt;
-      enemy.x += enemy.hitVx * dt;
-      enemy.y += enemy.hitVy * dt;
-      enemy.hitVx *= Math.pow(0.86, dt * 60);
-      enemy.hitVy *= Math.pow(0.86, dt * 60);
-      enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
+      if ((enemy.regenPerSecond ?? 0) > 0 && enemy.hp > 0) {
+        enemy.hp = Math.min(enemy.maxHp, enemy.hp + enemy.regenPerSecond * dt);
+      }
+      const tdx = target.x - enemy.x;
+      const tdy = target.y - enemy.y;
+      const tlen = Math.hypot(tdx, tdy);
+      let dirX = tlen ? tdx / tlen : 0;
+      let dirY = tlen ? tdy / tlen : 0;
+      if (enemy._hastedFlag === undefined) {
+        enemy._hastedFlag =
+          (enemy.affixes && enemy.affixes.indexOf("hasted") >= 0) || enemy.eliteAffix === "swift";
+        enemy._numericId = Number.parseInt(String(enemy.id).replace(/\D/g, ""), 10) || 0;
+      }
+      if (enemy._hastedFlag) {
+        enemy.strafePhase = (enemy.strafePhase ?? 0) + dt * 5.2;
+        const weave = Math.sin(enemy.strafePhase + enemy._numericId * 0.37) * 0.42;
+        const wx = dirX - dirY * weave;
+        const wy = dirY + dirX * weave;
+        const wlen = Math.hypot(wx, wy);
+        if (wlen) {
+          dirX = wx / wlen;
+          dirY = wy / wlen;
+        } else {
+          dirX = 0;
+          dirY = 0;
+        }
+      }
+      const moveScale = enemy.speed * dt;
+      enemy.x += dirX * moveScale + enemy.hitVx * dt;
+      enemy.y += dirY * moveScale + enemy.hitVy * dt;
+      enemy.hitVx *= decay;
+      enemy.hitVy *= decay;
+      enemy.hitFlash = enemy.hitFlash > dt ? enemy.hitFlash - dt : 0;
 
       const hitDistance = enemy.radius + target.radius;
-      if (distanceSq(enemy.x, enemy.y, target.x, target.y) <= hitDistance * hitDistance) {
+      const ddx = enemy.x - target.x;
+      const ddy = enemy.y - target.y;
+      if (ddx * ddx + ddy * ddy <= hitDistance * hitDistance) {
         if (target.invulnerableFor <= 0) {
           const incomingDamage = Math.max(1, enemy.damage - target.stats.armor);
-          const absorbed = Math.min(target.shield ?? 0, incomingDamage);
-          target.shield = Math.max(0, (target.shield ?? 0) - absorbed);
-          target.hp = Math.max(0, target.hp - (incomingDamage - absorbed));
+          const shield = target.shield ?? 0;
+          const absorbed = shield < incomingDamage ? shield : incomingDamage;
+          target.shield = shield - absorbed;
+          const remaining = target.hp - (incomingDamage - absorbed);
+          target.hp = remaining > 0 ? remaining : 0;
           target.invulnerableFor = PLAYER_BASE.invulnerability;
         }
-        enemy.x -= direction.x * 20;
-        enemy.y -= direction.y * 20;
+        enemy.x -= dirX * 20;
+        enemy.y -= dirY * 20;
       }
     }
   }
 
   enemyMoveDirection(enemy, target, dt) {
     const direction = normalize(target.x - enemy.x, target.y - enemy.y);
-    if (enemy.eliteAffix !== "swift") return direction;
+    if (!enemy.affixes?.includes("hasted") && enemy.eliteAffix !== "swift") return direction;
 
     enemy.strafePhase = (enemy.strafePhase ?? 0) + dt * 5.2;
     const numericId = Number.parseInt(enemy.id.replace(/\D/g, ""), 10) || 0;
@@ -320,24 +442,40 @@ export class GameSimulation {
   }
 
   updatePickups(dt) {
-    for (const pickup of [...this.pickups.values()]) {
+    const pickupList = this.pickups;
+    if (!pickupList.size) return;
+    const toCollect = [];
+    for (const pickup of pickupList.values()) {
       for (const player of this.players.values()) {
         const magnetRadius = this.pickupMagnetRadius(player);
-        const distSq = distanceSq(player.x, player.y, pickup.x, pickup.y);
-        if (distSq < magnetRadius * magnetRadius) {
-          const direction = normalize(player.x - pickup.x, player.y - pickup.y);
-          const pull = 280 + (1 - Math.sqrt(distSq) / magnetRadius) * 520;
-          pickup.x += direction.x * pull * dt;
-          pickup.y += direction.y * pull * dt;
+        const dx0 = player.x - pickup.x;
+        const dy0 = player.y - pickup.y;
+        const distSq = dx0 * dx0 + dy0 * dy0;
+        const magnetSq = magnetRadius * magnetRadius;
+        if (distSq < magnetSq) {
+          const len = Math.sqrt(distSq);
+          if (len) {
+            const pull = 280 + (1 - len / magnetRadius) * 520;
+            const scale = (pull * dt) / len;
+            pickup.x += dx0 * scale;
+            pickup.y += dy0 * scale;
+          }
         }
 
         const collectDistance = player.radius + player.stats.pickupRadius * 0.55 + pickup.radius;
-        if (distanceSq(player.x, player.y, pickup.x, pickup.y) <= collectDistance * collectDistance) {
-          this.pickups.delete(pickup.id);
-          this.collectPickup(player, pickup);
+        const ndx = player.x - pickup.x;
+        const ndy = player.y - pickup.y;
+        if (ndx * ndx + ndy * ndy <= collectDistance * collectDistance) {
+          toCollect.push({ pickup, player });
           break;
         }
       }
+    }
+    for (let i = 0; i < toCollect.length; i += 1) {
+      const { pickup, player } = toCollect[i];
+      if (!pickupList.has(pickup.id)) continue;
+      pickupList.delete(pickup.id);
+      this.collectPickup(player, pickup);
     }
   }
 
@@ -359,11 +497,37 @@ export class GameSimulation {
     this.spawnHitEffect(hitX, hitY, sourceDirection, damage, enemy.hp <= 0);
     if (enemy.hp > 0 || !this.enemies.has(enemy.id)) return;
     this.enemies.delete(enemy.id);
-    const owner = [...this.players.values()].find((player) => source?.ownerId === player.id) ?? [...this.players.values()][0];
+    let owner = null;
+    let firstPlayer = null;
+    const ownerId = source?.ownerId;
+    for (const player of this.players.values()) {
+      if (!firstPlayer) firstPlayer = player;
+      if (ownerId === player.id) {
+        owner = player;
+        break;
+      }
+    }
+    if (!owner) owner = firstPlayer;
     if (owner) owner.kills += 1;
+    this.triggerEnemyDeathAffixes(enemy, owner);
     this.spawnSplitChildren(enemy);
     const pickup = this.createEnemyDrop(enemy, owner);
     this.pickups.set(pickup.id, pickup);
+  }
+
+  triggerEnemyDeathAffixes(enemy, owner = null) {
+    if (!enemy.affixes?.includes("volatile") || !enemy.volatileRadius || !enemy.volatileDamage) return;
+    const effectId = this.entityId();
+    this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, enemy.volatileRadius, 0.36));
+    for (const player of this.players.values()) {
+      if (player.hp <= 0 || distanceSq(enemy.x, enemy.y, player.x, player.y) > enemy.volatileRadius ** 2) continue;
+      const incomingDamage = Math.max(1, enemy.volatileDamage - player.stats.armor);
+      const absorbed = Math.min(player.shield ?? 0, incomingDamage);
+      player.shield = Math.max(0, (player.shield ?? 0) - absorbed);
+      player.hp = Math.max(0, player.hp - (incomingDamage - absorbed));
+      player.invulnerableFor = Math.max(player.invulnerableFor, PLAYER_BASE.invulnerability * 0.5);
+    }
+    if (owner) owner.scrap += 1;
   }
 
   createEnemyDrop(enemy, owner = null) {
@@ -518,10 +682,26 @@ export class GameSimulation {
   }
 
   cleanupFarEntities() {
-    const players = [...this.players.values()];
-    for (const enemy of [...this.enemies.values()]) {
-      const closeToAPlayer = players.some((player) => distanceSq(player.x, player.y, enemy.x, enemy.y) < 1800 ** 2);
-      if (!closeToAPlayer) this.enemies.delete(enemy.id);
+    const limitSq = 1800 * 1800;
+    const players = this.players;
+    let toRemove = null;
+    for (const enemy of this.enemies.values()) {
+      let close = false;
+      for (const player of players.values()) {
+        const dx = player.x - enemy.x;
+        const dy = player.y - enemy.y;
+        if (dx * dx + dy * dy < limitSq) {
+          close = true;
+          break;
+        }
+      }
+      if (!close) {
+        if (!toRemove) toRemove = [];
+        toRemove.push(enemy.id);
+      }
+    }
+    if (toRemove) {
+      for (let i = 0; i < toRemove.length; i += 1) this.enemies.delete(toRemove[i]);
     }
   }
 
@@ -539,7 +719,13 @@ export class GameSimulation {
   }
 
   checkGameOver() {
-    const anyAlive = [...this.players.values()].some((player) => player.hp > 0);
+    let anyAlive = false;
+    for (const player of this.players.values()) {
+      if (player.hp > 0) {
+        anyAlive = true;
+        break;
+      }
+    }
     if (!anyAlive) this.state = "gameover";
   }
 
@@ -547,4 +733,40 @@ export class GameSimulation {
     this.nextEntityId += 1;
     return `e${this.nextEntityId}`;
   }
+
+  _selectPrimaryTargetFast(player) {
+    const cache = this._targetingCache;
+    if (!cache.fastPath) {
+      return selectTarget(player, [...this.enemies.values()], this.targeting.primaryWeapon, this.rng);
+    }
+    const allowedTypes = cache.allowedTypes;
+    const hasTypeFilter = allowedTypes !== null;
+    const maxRangeSq = cache.maxRangeSq;
+    const px = player.x;
+    const py = player.y;
+    let best = null;
+    let bestDist = Infinity;
+    for (const enemy of this.enemies.values()) {
+      if (enemy.hp <= 0) continue;
+      if (hasTypeFilter && !allowedTypes.has(enemy.type)) continue;
+      const dx = enemy.x - px;
+      const dy = enemy.y - py;
+      const dist = dx * dx + dy * dy;
+      if (dist > maxRangeSq) continue;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = enemy;
+      }
+    }
+    return best;
+  }
+}
+
+function buildTargetingCache(weapon) {
+  const fastPath = weapon.strategy === "nearest";
+  const allowedTypes =
+    Array.isArray(weapon.enemyTypes) && weapon.enemyTypes.length ? new Set(weapon.enemyTypes) : null;
+  const maxRangeSq = weapon.maxRange > 0 ? weapon.maxRange * weapon.maxRange : Infinity;
+  const angleThreshold = Math.cos((weapon.firingAngleDegrees * Math.PI) / 180);
+  return { fastPath, allowedTypes, maxRangeSq, angleThreshold };
 }
