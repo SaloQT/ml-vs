@@ -1,6 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "balance:economy": "node scripts/economy-balance.mjs"
   }
 }
