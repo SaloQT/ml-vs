@@ -22,46 +22,103 @@ export const PERMANENT_UPGRADES = [
   }),
 ];
 
+export const EQUIPMENT_SLOTS = {
+  weapon: "Weapon",
+  hull: "Hull",
+  utility: "Utility",
+};
+
 export const EQUIPMENT = {
   weapon: [
-    equipment("pulse-laser", "Pulse Laser", "Balanced automatic plasma fire.", "weapon", (player) => {
+    equipment("pulse-laser", "Pulse Laser", "Balanced automatic plasma fire.", "weapon", ["Baseline damage and cadence"], (player) => {
       player.stats.damage *= 1;
     }),
-    equipment("rail-cannon", "Rail Cannon", "Harder hits, slower cadence.", "weapon", (player) => {
+    equipment("rail-cannon", "Rail Cannon", "Harder hits, slower cadence.", "weapon", ["+35% damage", "-24% fire rate", "+18% projectile speed"], (player) => {
       player.stats.damage *= 1.35;
       player.stats.fireRate *= 0.76;
       player.stats.projectileSpeed *= 1.18;
     }),
-    equipment("scatter-core", "Scatter Core", "Extra projectile, weaker shots.", "weapon", (player) => {
+    equipment("scatter-core", "Scatter Core", "Extra projectile, weaker shots.", "weapon", ["+1 projectile", "-22% damage", "-10% fire rate"], (player) => {
       player.stats.projectiles += 1;
       player.stats.damage *= 0.78;
       player.stats.fireRate *= 0.9;
     }),
+    equipment("coil-repeater", "Coil Repeater", "Rapid cycling coils with lighter impact.", "weapon", ["+28% fire rate", "-12% damage", "-8% projectile speed"], (player) => {
+      player.stats.fireRate *= 1.28;
+      player.stats.damage *= 0.88;
+      player.stats.projectileSpeed *= 0.92;
+    }),
+    equipment("ion-lance", "Ion Lance", "Precision beam tuned for critical strikes.", "weapon", ["+10% crit chance", "+35% crit damage", "-12% fire rate"], (player) => {
+      player.stats.critChance += 0.1;
+      player.stats.critDamage += 0.35;
+      player.stats.fireRate *= 0.88;
+    }),
+    equipment("flak-array", "Flak Array", "Wide blast pattern for close-range swarms.", "weapon", ["+1 projectile", "+18% area", "-16% damage", "-12% projectile speed"], (player) => {
+      player.stats.projectiles += 1;
+      player.stats.area *= 1.18;
+      player.stats.damage *= 0.84;
+      player.stats.projectileSpeed *= 0.88;
+    }),
   ],
   hull: [
-    equipment("scout-frame", "Scout Frame", "Fast frame with lighter plating.", "hull", (player) => {
+    equipment("scout-frame", "Scout Frame", "Fast frame with lighter plating.", "hull", ["+8% speed", "-10 max hull"], (player) => {
       player.stats.speed *= 1.08;
       player.stats.maxHp -= 10;
       player.hp = Math.min(player.hp, player.stats.maxHp);
     }),
-    equipment("bulwark-frame", "Bulwark Frame", "Heavy frame with armor and hull.", "hull", (player) => {
+    equipment("bulwark-frame", "Bulwark Frame", "Heavy frame with armor and hull.", "hull", ["+28 max hull", "+3 armor", "-8% speed"], (player) => {
       player.stats.maxHp += 28;
       player.stats.armor += 3;
       player.stats.speed *= 0.92;
       player.hp = player.stats.maxHp;
     }),
-    equipment("standard-frame", "Standard Frame", "Reliable starter hull.", "hull", () => {}),
+    equipment("standard-frame", "Standard Frame", "Reliable starter hull.", "hull", ["No stat tradeoffs"], () => {}),
+    equipment("interceptor-frame", "Interceptor Frame", "Stripped pursuit frame for aggressive piloting.", "hull", ["+14% speed", "+8% fire rate", "-22 max hull"], (player) => {
+      player.stats.speed *= 1.14;
+      player.stats.fireRate *= 1.08;
+      player.stats.maxHp -= 22;
+      player.hp = Math.min(player.hp, player.stats.maxHp);
+    }),
+    equipment("aegis-frame", "Aegis Frame", "Dense plating with redundant repair channels.", "hull", ["+18 max hull", "+2 armor", "+6% repair drops", "-5% speed"], (player) => {
+      player.stats.maxHp += 18;
+      player.stats.armor += 2;
+      player.stats.repairDropBonus += 0.06;
+      player.stats.speed *= 0.95;
+      player.hp = player.stats.maxHp;
+    }),
+    equipment("reactor-frame", "Reactor Frame", "Expanded reactor bay that trades shielding for output.", "hull", ["+16% damage", "+10% fire rate", "-16 max hull", "-1 armor"], (player) => {
+      player.stats.damage *= 1.16;
+      player.stats.fireRate *= 1.1;
+      player.stats.maxHp -= 16;
+      player.stats.armor -= 1;
+      player.hp = Math.min(player.hp, player.stats.maxHp);
+    }),
   ],
   utility: [
-    equipment("magnet-rig", "Magnet Rig", "Improved pickup range.", "utility", (player) => {
+    equipment("magnet-rig", "Magnet Rig", "Improved pickup range.", "utility", ["+38 pickup radius"], (player) => {
       player.stats.pickupRadius += 38;
     }),
-    equipment("targeting-suite", "Targeting Suite", "Better critical chance.", "utility", (player) => {
+    equipment("targeting-suite", "Targeting Suite", "Better critical chance.", "utility", ["+8% crit chance"], (player) => {
       player.stats.critChance += 0.08;
     }),
-    equipment("repair-cache", "Repair Cache", "More repair drops, less XP gain.", "utility", (player) => {
+    equipment("repair-cache", "Repair Cache", "More repair drops, less XP gain.", "utility", ["+8% repair drops", "-6% XP gain"], (player) => {
       player.stats.repairDropBonus += 0.08;
       player.stats.xpGain *= 0.94;
+    }),
+    equipment("salvage-net", "Salvage Net", "Scrap reclamation rig with a wider collection field.", "utility", ["+10% salvage", "+20 pickup radius", "-4% speed"], (player) => {
+      player.stats.salvageBonus += 0.1;
+      player.stats.pickupRadius += 20;
+      player.stats.speed *= 0.96;
+    }),
+    equipment("overclock-relay", "Overclock Relay", "Pushes weapon power at the cost of repairs.", "utility", ["+9% damage", "+9% fire rate", "-5% repair drops"], (player) => {
+      player.stats.damage *= 1.09;
+      player.stats.fireRate *= 1.09;
+      player.stats.repairDropBonus -= 0.05;
+    }),
+    equipment("stabilizer-vanes", "Stabilizer Vanes", "Tighter flight and faster rounds with less draw range.", "utility", ["+6% speed", "+10% projectile speed", "-18 pickup radius"], (player) => {
+      player.stats.speed *= 1.06;
+      player.stats.projectileSpeed *= 1.1;
+      player.stats.pickupRadius -= 18;
     }),
   ],
 };
@@ -83,32 +140,38 @@ export function defaultMetaProgress() {
 }
 
 export function normalizeMetaProgress(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
   const defaults = defaultMetaProgress();
+  const rawEquipment = source.equipment && typeof source.equipment === "object" ? source.equipment : {};
   return {
     ...defaults,
-    ...raw,
+    ...source,
     upgrades: {
       ...defaults.upgrades,
-      ...(raw.upgrades ?? {}),
+      ...(source.upgrades ?? {}),
     },
-    equipment: {
-      ...defaults.equipment,
-      ...(raw.equipment ?? {}),
-    },
+    equipment: Object.fromEntries(
+      Object.entries(defaults.equipment).map(([slot, defaultId]) => {
+        const selectedId = rawEquipment[slot] ?? defaultId;
+        const isKnown = EQUIPMENT[slot]?.some((item) => item.id === selectedId);
+        return [slot, isKnown ? selectedId : defaultId];
+      }),
+    ),
     best: {
       ...defaults.best,
-      ...(raw.best ?? {}),
+      ...(source.best ?? {}),
     },
   };
 }
 
 export function applyMetaProgress(player, meta) {
+  const normalized = normalizeMetaProgress(meta);
   for (const upgrade of PERMANENT_UPGRADES) {
-    const level = Math.min(upgrade.maxLevel, meta.upgrades[upgrade.id] ?? 0);
+    const level = Math.min(upgrade.maxLevel, normalized.upgrades[upgrade.id] ?? 0);
     if (level > 0) upgrade.apply(level, player);
   }
 
-  for (const [slot, selectedId] of Object.entries(meta.equipment)) {
+  for (const [slot, selectedId] of Object.entries(normalized.equipment)) {
     const item = EQUIPMENT[slot]?.find((candidate) => candidate.id === selectedId);
     item?.apply(player);
   }
@@ -132,6 +195,6 @@ function permanent(id, name, description, maxLevel, baseCost, apply) {
   return { id, name, description, maxLevel, baseCost, apply };
 }
 
-function equipment(id, name, description, slot, apply) {
-  return { id, name, description, slot, apply };
+function equipment(id, name, description, slot, effects, apply) {
+  return { id, name, description, slot, effects, apply };
 }

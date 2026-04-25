@@ -3,6 +3,7 @@ import { InputController } from "./input.js";
 import {
   calculateRunScrap,
   EQUIPMENT,
+  EQUIPMENT_SLOTS,
   META_STORAGE_KEY,
   normalizeMetaProgress,
   PERMANENT_UPGRADES,
@@ -307,24 +308,43 @@ function renderArmory() {
 
   const equipmentRoot = document.querySelector("#equipment-list");
   equipmentRoot.replaceChildren(
-    ...Object.entries(EQUIPMENT).flatMap(([slot, items]) =>
-      items.map((item) => {
-        const selected = metaProgress.equipment[slot] === item.id;
-        const row = document.createElement("div");
-        row.className = "system-row";
-        row.innerHTML = `
-          <strong>${item.name}</strong>
-          <p>${item.description}</p>
-          <button type="button" ${selected ? "disabled" : ""}>${selected ? "Equipped" : "Equip"}</button>
-        `;
-        row.querySelector("button").addEventListener("click", () => {
-          metaProgress.equipment[slot] = item.id;
-          saveMetaProgress();
-          renderArmory();
-        });
-        return row;
-      }),
-    ),
+    ...Object.entries(EQUIPMENT).map(([slot, items]) => {
+      const currentItem = items.find((item) => item.id === metaProgress.equipment[slot]) ?? items[0];
+      const group = document.createElement("section");
+      group.className = "equipment-slot";
+      group.innerHTML = `
+        <div class="equipment-slot-header">
+          <span>${EQUIPMENT_SLOTS[slot] ?? slot}</span>
+          <strong>${currentItem.name}</strong>
+        </div>
+      `;
+      const choices = document.createElement("div");
+      choices.className = "equipment-slot-choices";
+      choices.replaceChildren(
+        ...items.map((item) => {
+          const selected = metaProgress.equipment[slot] === item.id;
+          const row = document.createElement("div");
+          row.className = `system-row equipment-row${selected ? " equipped" : ""}`;
+          row.innerHTML = `
+            <div class="equipment-row-title">
+              <strong>${item.name}</strong>
+              <span>${selected ? "Current" : EQUIPMENT_SLOTS[slot] ?? slot}</span>
+            </div>
+            <p>${item.description}</p>
+            <ul>${item.effects.map((effect) => `<li>${effect}</li>`).join("")}</ul>
+            <button type="button" ${selected ? "disabled" : ""}>${selected ? "Equipped" : "Equip"}</button>
+          `;
+          row.querySelector("button").addEventListener("click", () => {
+            metaProgress.equipment[slot] = item.id;
+            saveMetaProgress();
+            renderArmory();
+          });
+          return row;
+        }),
+      );
+      group.append(choices);
+      return group;
+    }),
   );
 }
 
