@@ -1,0 +1,11 @@
+tmp/
+tmp-upgrade-check-*/
+
+.DS_Store
+Thumbs.db
+
+node_modules/
+dist/
+coverage/
+
+*.log

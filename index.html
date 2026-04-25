@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Space Survivors</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <canvas id="game" width="1280" height="720" aria-label="Space Survivors game canvas"></canvas>
+
+      <section id="main-menu" class="main-menu" aria-label="Space Survivors main menu">
+        <div class="menu-stars" aria-hidden="true"></div>
+        <div class="menu-orbit menu-orbit-a" aria-hidden="true"></div>
+        <div class="menu-orbit menu-orbit-b" aria-hidden="true"></div>
+        <div class="menu-ship" aria-hidden="true"></div>
+        <div class="menu-drone menu-drone-a" aria-hidden="true"></div>
+        <div class="menu-drone menu-drone-b" aria-hidden="true"></div>
+
+        <div class="menu-content">
+          <div class="menu-title">
+            <span>Deep Sector</span>
+            <h1>Space Survivors</h1>
+          </div>
+
+          <div class="menu-actions">
+            <button id="start-run" class="launch-button" type="button">
+              <span class="launch-icon" aria-hidden="true"></span>
+              <span>Launch Run</span>
+            </button>
+            <div class="menu-secondary">
+              <button id="open-armory" type="button">Armory</button>
+              <button id="open-options" type="button">Options</button>
+              <button id="open-ppo" type="button">PPO Lab</button>
+            </div>
+          </div>
+
+          <div class="menu-loadout" aria-label="Starting ship status">
+            <div>
+              <span class="status-icon hull-icon" aria-hidden="true"></span>
+              <strong>120</strong>
+              <small>Hull</small>
+            </div>
+            <div>
+              <span class="status-icon target-icon" aria-hidden="true"></span>
+              <strong>Auto</strong>
+              <small>Target</small>
+            </div>
+            <div>
+              <span class="status-icon upgrade-menu-icon" aria-hidden="true"></span>
+              <strong>Rogue</strong>
+              <small>Upgrades</small>
+            </div>
+          </div>
+        </div>
+
+        <div id="armory-panel" class="systems-panel hidden" role="dialog" aria-modal="true" aria-labelledby="armory-title">
+          <div class="systems-card wide">
+            <div class="options-title">
+              <span>Permanent Progression</span>
+              <h2 id="armory-title">Armory</h2>
+            </div>
+            <div class="scrap-bank"><strong id="scrap-count">0</strong><small>Scrap</small></div>
+            <div id="permanent-upgrades" class="systems-list"></div>
+            <h3>Equipment</h3>
+            <div id="equipment-list" class="equipment-list"></div>
+            <div class="options-actions"><button id="close-armory" type="button">Back</button></div>
+          </div>
+        </div>
+
+        <div id="ppo-panel" class="systems-panel hidden" role="dialog" aria-modal="true" aria-labelledby="ppo-title">
+          <div class="systems-card wide">
+            <div class="options-title">
+              <span>Policy Training</span>
+              <h2 id="ppo-title">PPO Lab</h2>
+            </div>
+            <div class="ppo-stats">
+              <div><strong id="ppo-iteration">0</strong><small>Iteration</small></div>
+              <div><strong id="ppo-score">0</strong><small>Score</small></div>
+              <div><strong id="ppo-survival">0s</strong><small>Survival</small></div>
+              <div><strong id="ppo-kills">0</strong><small>Kills</small></div>
+              <div><strong id="ppo-damage">0</strong><small>Damage</small></div>
+              <div><strong id="ppo-death">0%</strong><small>Death</small></div>
+            </div>
+            <div class="ppo-graphs" aria-label="PPO training graphs">
+              <canvas data-ppo-chart="score" width="360" height="170" aria-label="PPO score graph"></canvas>
+              <canvas data-ppo-chart="damage" width="360" height="170" aria-label="PPO damage graph"></canvas>
+              <canvas data-ppo-chart="kills" width="360" height="170" aria-label="PPO kills graph"></canvas>
+              <canvas data-ppo-chart="deathRate" width="360" height="170" aria-label="PPO death rate graph"></canvas>
+            </div>
+            <div class="options-actions">
+              <button id="start-ppo" type="button">Start</button>
+              <button id="close-ppo" type="button">Back</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="options-panel" class="options-panel hidden" role="dialog" aria-modal="true" aria-labelledby="options-title">
+          <div class="options-card">
+            <div class="options-title">
+              <span>Ship Systems</span>
+              <h2 id="options-title">Options</h2>
+            </div>
+
+            <div class="option-list">
+              <label class="option-row">
+                <span>
+                  <strong>Screen Shake</strong>
+                  <small>Camera impulse on heavy impacts</small>
+                </span>
+                <input id="option-screen-shake" type="checkbox" />
+              </label>
+
+              <label class="option-row">
+                <span>
+                  <strong>Lighting</strong>
+                  <small>Glow passes around ships and energy</small>
+                </span>
+                <input id="option-lighting" type="checkbox" />
+              </label>
+
+              <label class="option-row">
+                <span>
+                  <strong>Particles</strong>
+                  <small>Trails, sparks, space dust, explosions</small>
+                </span>
+                <input id="option-particles" type="checkbox" />
+              </label>
+            </div>
+
+            <div class="options-actions">
+              <button id="close-options" type="button">Back</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="upgrade-panel" class="upgrade-panel hidden" aria-live="polite">
+        <div class="upgrade-header">
+          <p>Level Up</p>
+          <h1>Choose an upgrade</h1>
+        </div>
+        <div id="upgrade-options" class="upgrade-options"></div>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
