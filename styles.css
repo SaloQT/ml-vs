@@ -668,6 +668,15 @@ body {
   text-align: center;
 }
 
+.file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .upgrade-panel {
   position: absolute;
   inset: 0;

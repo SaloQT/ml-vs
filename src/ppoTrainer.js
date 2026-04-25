@@ -14,6 +14,8 @@ const ACTIONS = [
 ];
 
 const FEATURE_COUNT = 14;
+const MODEL_FORMAT = "space-survivors-ppo";
+const MODEL_VERSION = 1;
 const STEP_DT = 1 / 30;
 
 export class PpoTrainer {
@@ -225,7 +227,31 @@ export class PpoTrainer {
       while (weights.length < featureCount) weights.push(0);
     }
   }
+
+  exportModel() {
+    return {
+      format: MODEL_FORMAT,
+      version: MODEL_VERSION,
+      exportedAt: new Date().toISOString(),
+      iteration: this.iteration,
+      featureCount: this.weights[0]?.length ?? FEATURE_COUNT,
+      actionCount: ACTIONS.length,
+      weights: this.weights.map((row) => [...row]),
+      history: this.history.map((point) => ({ ...point })),
+    };
+  }
+
+  importModel(model) {
+    const normalized = normalizeModel(model);
+    this.iteration = normalized.iteration;
+    this.weights = normalized.weights;
+    this.history = normalized.history;
+    return this;
+  }
 }
+
+PpoTrainer.MODEL_FORMAT = MODEL_FORMAT;
+PpoTrainer.MODEL_VERSION = MODEL_VERSION;
 
 function nearest(origin, items) {
   let best = null;
@@ -299,4 +325,66 @@ function initialWeights() {
 
 function nowMs() {
   return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function normalizeModel(model) {
+  if (!model || typeof model !== "object") {
+    throw new Error("PPO model file is not valid JSON data.");
+  }
+  if (model.format !== MODEL_FORMAT) {
+    throw new Error("PPO model format is not supported.");
+  }
+  if (model.version !== MODEL_VERSION) {
+    throw new Error("PPO model version is not supported.");
+  }
+  const weights = normalizeWeights(model.weights);
+  return {
+    iteration: clampNonNegativeInteger(model.iteration, 0),
+    weights,
+    history: normalizeHistory(model.history),
+  };
+}
+
+function normalizeWeights(rawWeights) {
+  if (!Array.isArray(rawWeights) || rawWeights.length !== ACTIONS.length) {
+    throw new Error("PPO model weights do not match the action space.");
+  }
+  const featureCount = Math.max(FEATURE_COUNT, ...rawWeights.map((row) => (Array.isArray(row) ? row.length : 0)));
+  return rawWeights.map((row) => {
+    if (!Array.isArray(row)) throw new Error("PPO model weights are malformed.");
+    const weights = row.map((value) => {
+      const number = Number(value);
+      if (!Number.isFinite(number)) throw new Error("PPO model weights contain invalid values.");
+      return number;
+    });
+    while (weights.length < featureCount) weights.push(0);
+    return weights;
+  });
+}
+
+function normalizeHistory(rawHistory) {
+  if (!Array.isArray(rawHistory)) return [];
+  return rawHistory.slice(-400).map((point) => ({
+    iteration: clampNonNegativeInteger(point?.iteration, 0),
+    reward: finiteNumber(point?.reward, 0),
+    seconds: finiteNumber(point?.seconds, 0),
+    kills: finiteNumber(point?.kills, 0),
+    damage: finiteNumber(point?.damage, 0),
+    damageTaken: finiteNumber(point?.damageTaken, 0),
+    score: finiteNumber(point?.score, 0),
+    deathRate: finiteNumber(point?.deathRate, 0),
+    episodes: clampNonNegativeInteger(point?.episodes, 0),
+    ticks: clampNonNegativeInteger(point?.ticks, 0),
+    ticksPerSecond: clampNonNegativeInteger(point?.ticksPerSecond, 0),
+  }));
+}
+
+function clampNonNegativeInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : fallback;
+}
+
+function finiteNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }

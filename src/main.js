@@ -24,6 +24,9 @@ const closeArmory = document.querySelector("#close-armory");
 const ppoPanel = document.querySelector("#ppo-panel");
 const closePpo = document.querySelector("#close-ppo");
 const startPpo = document.querySelector("#start-ppo");
+const savePpo = document.querySelector("#save-ppo");
+const loadPpo = document.querySelector("#load-ppo");
+const ppoModelFile = document.querySelector("#ppo-model-file");
 const ppoAverageWindowInput = document.querySelector("#ppo-average-window");
 const ppoGraphs = [...document.querySelectorAll("[data-ppo-chart]")];
 const closeOptions = document.querySelector("#close-options");
@@ -88,6 +91,9 @@ startPpo.addEventListener("click", () => {
   ppoRunning = !ppoRunning;
   startPpo.textContent = ppoRunning ? "Pause" : "Start";
 });
+savePpo.addEventListener("click", savePpoModel);
+loadPpo.addEventListener("click", () => ppoModelFile.click());
+ppoModelFile.addEventListener("change", loadPpoModel);
 
 ppoAverageWindowInput?.addEventListener("change", () => {
   ppoGraphAverageWindow = clampInteger(ppoAverageWindowInput.value, 1, 50, 8);
@@ -285,6 +291,35 @@ function loadMetaProgress() {
 function saveMetaProgress() {
   localStorage.setItem(META_STORAGE_KEY, JSON.stringify(metaProgress));
   ppoTrainer.metaProgress = metaProgress;
+}
+
+function savePpoModel() {
+  const model = ppoTrainer.exportModel();
+  const blob = new Blob([JSON.stringify(model, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `space-survivors-ppo-iter-${model.iteration}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
+}
+
+async function loadPpoModel() {
+  const [file] = ppoModelFile.files ?? [];
+  if (!file) return;
+  try {
+    const model = JSON.parse(await file.text());
+    ppoTrainer.importModel(model);
+    ppoTrainer.metaProgress = metaProgress;
+    ppoRunning = false;
+    startPpo.textContent = "Start";
+    renderPpoPanel();
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : "Unable to load PPO model.");
+  } finally {
+    ppoModelFile.value = "";
+  }
 }
 
 function renderArmory() {

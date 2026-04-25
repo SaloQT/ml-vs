@@ -68,3 +68,29 @@ test("PPO feature and policy outputs stay finite and normalized", () => {
   assert.equal(probabilities.every(Number.isFinite), true);
   assert.equal(Number(probabilities.reduce((sum, value) => sum + value, 0).toFixed(12)), 1);
 });
+
+test("PPO models export and import trained weights and history", () => {
+  const trained = new PpoTrainer();
+  trained.trainBatch(2);
+  const model = trained.exportModel();
+  const restored = new PpoTrainer();
+
+  restored.importModel(JSON.parse(JSON.stringify(model)));
+
+  assert.equal(model.format, PpoTrainer.MODEL_FORMAT);
+  assert.equal(model.version, PpoTrainer.MODEL_VERSION);
+  assert.equal(restored.iteration, trained.iteration);
+  assert.deepEqual(roundedWeights(restored), roundedWeights(trained));
+  assert.deepEqual(restored.history, trained.history);
+  assert.deepEqual(episodeSummary(restored.runEpisode(24680)), episodeSummary(trained.runEpisode(24680)));
+});
+
+test("PPO model import rejects incompatible model data", () => {
+  const trainer = new PpoTrainer();
+
+  assert.throws(() => trainer.importModel({ format: "wrong", version: PpoTrainer.MODEL_VERSION }), /format/);
+  assert.throws(
+    () => trainer.importModel({ format: PpoTrainer.MODEL_FORMAT, version: PpoTrainer.MODEL_VERSION, weights: [[0]] }),
+    /action space/,
+  );
+});
