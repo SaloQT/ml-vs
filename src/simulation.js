@@ -106,8 +106,10 @@ export class GameSimulation {
     for (const player of this.players.values()) {
       const input = this.inputs.get(player.id) ?? { moveX: 0, moveY: 0 };
       const move = normalize(input.moveX, input.moveY);
-      player.vx = move.x * player.stats.speed;
-      player.vy = move.y * player.stats.speed;
+      player.overdriveFor = Math.max(0, (player.overdriveFor ?? 0) - dt);
+      player.magnetBurstFor = Math.max(0, (player.magnetBurstFor ?? 0) - dt);
+      player.vx = move.x * this.playerSpeed(player);
+      player.vy = move.y * this.playerSpeed(player);
       player.x = clamp(player.x + player.vx * dt, -GAME.worldRadius, GAME.worldRadius);
       player.y = clamp(player.y + player.vy * dt, -GAME.worldRadius, GAME.worldRadius);
       player.invulnerableFor = Math.max(0, player.invulnerableFor - dt);
@@ -119,7 +121,7 @@ export class GameSimulation {
 
       if (player.cooldown <= 0 && this.canFirePrimaryWeapon(player)) {
         this.fireVolley(player);
-        player.cooldown = 0.42 / player.stats.fireRate;
+        player.cooldown = 0.42 / this.playerFireRate(player);
       }
     }
   }
@@ -247,7 +249,10 @@ export class GameSimulation {
       const hitDistance = enemy.radius + target.radius;
       if (distanceSq(enemy.x, enemy.y, target.x, target.y) <= hitDistance * hitDistance) {
         if (target.invulnerableFor <= 0) {
-          target.hp = Math.max(0, target.hp - Math.max(1, enemy.damage - target.stats.armor));
+          const incomingDamage = Math.max(1, enemy.damage - target.stats.armor);
+          const absorbed = Math.min(target.shield ?? 0, incomingDamage);
+          target.shield = Math.max(0, (target.shield ?? 0) - absorbed);
+          target.hp = Math.max(0, target.hp - (incomingDamage - absorbed));
           target.invulnerableFor = PLAYER_BASE.invulnerability;
         }
         enemy.x -= direction.x * 20;
@@ -317,7 +322,7 @@ export class GameSimulation {
   updatePickups(dt) {
     for (const pickup of [...this.pickups.values()]) {
       for (const player of this.players.values()) {
-        const magnetRadius = player.stats.pickupRadius + GAME.xpMagnetRadius;
+        const magnetRadius = this.pickupMagnetRadius(player);
         const distSq = distanceSq(player.x, player.y, pickup.x, pickup.y);
         if (distSq < magnetRadius * magnetRadius) {
           const direction = normalize(player.x - pickup.x, player.y - pickup.y);
@@ -329,11 +334,7 @@ export class GameSimulation {
         const collectDistance = player.radius + player.stats.pickupRadius * 0.55 + pickup.radius;
         if (distanceSq(player.x, player.y, pickup.x, pickup.y) <= collectDistance * collectDistance) {
           this.pickups.delete(pickup.id);
-          if (pickup.type === "repair") {
-            player.hp = Math.min(player.stats.maxHp, player.hp + pickup.value);
-          } else {
-            this.gainXp(player, pickup.value);
-          }
+          this.collectPickup(player, pickup);
           break;
         }
       }
@@ -361,12 +362,61 @@ export class GameSimulation {
     const owner = [...this.players.values()].find((player) => source?.ownerId === player.id) ?? [...this.players.values()][0];
     if (owner) owner.kills += 1;
     this.spawnSplitChildren(enemy);
-    const repairChance = 0.12 + (owner?.stats.repairDropBonus ?? 0);
-    const dropsRepair = enemy.type === "bruiser" && this.rng.next() < repairChance;
-    const pickup = dropsRepair
-      ? createPickup(this.entityId(), enemy.x, enemy.y, 28, "repair")
-      : createPickup(this.entityId(), enemy.x, enemy.y, enemy.xp);
+    const pickup = this.createEnemyDrop(enemy, owner);
     this.pickups.set(pickup.id, pickup);
+  }
+
+  createEnemyDrop(enemy, owner = null) {
+    const repairChance = 0.12 + (owner?.stats.repairDropBonus ?? 0);
+    const roll = this.rng.next();
+    if (enemy.type === "bruiser" && roll < repairChance) {
+      return createPickup(this.entityId(), enemy.x, enemy.y, 28, "repair");
+    }
+    if (roll < 0.012) return createPickup(this.entityId(), enemy.x, enemy.y, 24, "cache");
+    if (roll < 0.04) return createPickup(this.entityId(), enemy.x, enemy.y, 5, "overdrive");
+    if (roll < 0.07) return createPickup(this.entityId(), enemy.x, enemy.y, 5, "magnet");
+    if (roll < 0.11) return createPickup(this.entityId(), enemy.x, enemy.y, 24, "shield");
+    if (roll < 0.24) return createPickup(this.entityId(), enemy.x, enemy.y, enemy.type === "bruiser" ? 8 : 3, "scrap");
+    return createPickup(this.entityId(), enemy.x, enemy.y, enemy.xp, "xp");
+  }
+
+  collectPickup(player, pickup) {
+    if (pickup.type === "repair") {
+      player.hp = Math.min(player.stats.maxHp, player.hp + pickup.value);
+    } else if (pickup.type === "shield") {
+      player.shield = Math.min(60, (player.shield ?? 0) + pickup.value);
+    } else if (pickup.type === "scrap") {
+      player.scrap = (player.scrap ?? 0) + pickup.value;
+    } else if (pickup.type === "overdrive") {
+      player.overdriveFor = Math.max(player.overdriveFor ?? 0, pickup.value);
+      this.spawnCollectionEffect(player, "overdrive");
+    } else if (pickup.type === "magnet") {
+      player.magnetBurstFor = Math.max(player.magnetBurstFor ?? 0, pickup.value);
+      this.spawnCollectionEffect(player, "magnetBurst");
+    } else if (pickup.type === "cache") {
+      player.scrap = (player.scrap ?? 0) + pickup.value;
+      this.gainXp(player, Math.max(1, Math.round(pickup.value / 3)));
+      this.spawnCollectionEffect(player, "cacheOpened");
+    } else {
+      this.gainXp(player, pickup.value);
+    }
+  }
+
+  playerSpeed(player) {
+    return player.stats.speed * ((player.overdriveFor ?? 0) > 0 ? 1.28 : 1);
+  }
+
+  playerFireRate(player) {
+    return player.stats.fireRate * ((player.overdriveFor ?? 0) > 0 ? 1.7 : 1);
+  }
+
+  pickupMagnetRadius(player) {
+    return player.stats.pickupRadius + GAME.xpMagnetRadius + ((player.magnetBurstFor ?? 0) > 0 ? 420 : 0);
+  }
+
+  spawnCollectionEffect(player, type) {
+    const effectId = this.entityId();
+    this.effects.set(effectId, createEffect(effectId, type, player.x, player.y, type === "cacheOpened" ? 120 : 180, 0.42));
   }
 
   chainProjectileDamage(projectile, firstEnemy) {
