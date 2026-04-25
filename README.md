@@ -69,6 +69,12 @@ particles: true,
 - Equipment is split into weapon, hull, and utility slots. Each slot has several sidegrades with visible stat tradeoffs, and invalid saved equipment IDs fall back to the default loadout.
 - Scrap is awarded after runs from survival time, kills, wave reached, and salvage bonuses.
 - The PPO Lab runs a lightweight policy-gradient trainer against `GameSimulation` and tracks score, damage, kills, survival, and death rate per batch.
+- PPO training uses direct simulation state reads during episodes, normalized batch advantages, and an expanded deterministic feature vector for nearby enemies, pickups, health, shield, level progress, and temporary boosts.
+- Run deterministic PPO throughput and quality samples from the command line:
+
+```bash
+npm run ppo:benchmark -- --batches=6 --batch-size=4
+```
 
 ## Run Mechanics
 
