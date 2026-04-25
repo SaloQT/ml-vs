@@ -642,6 +642,32 @@ body {
   background: rgba(1, 5, 12, 0.68);
 }
 
+.ppo-average-control {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid rgba(100, 217, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(5, 14, 28, 0.72);
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ppo-average-control input {
+  width: 58px;
+  min-height: 28px;
+  border: 1px solid rgba(145, 168, 189, 0.28);
+  border-radius: 6px;
+  background: rgba(1, 5, 12, 0.78);
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+}
+
 .upgrade-panel {
   position: absolute;
   inset: 0;

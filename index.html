@@ -92,6 +92,10 @@
               <canvas data-ppo-chart="deathRate" width="360" height="170" aria-label="PPO death rate graph"></canvas>
             </div>
             <div class="options-actions">
+              <label class="ppo-average-control">
+                <span>Avg</span>
+                <input id="ppo-average-window" type="number" min="1" max="50" step="1" value="8" aria-label="PPO graph average iterations" />
+              </label>
               <button id="start-ppo" type="button">Start</button>
               <button id="close-ppo" type="button">Back</button>
             </div>

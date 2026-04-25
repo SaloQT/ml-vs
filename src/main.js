@@ -24,6 +24,7 @@ const closeArmory = document.querySelector("#close-armory");
 const ppoPanel = document.querySelector("#ppo-panel");
 const closePpo = document.querySelector("#close-ppo");
 const startPpo = document.querySelector("#start-ppo");
+const ppoAverageWindowInput = document.querySelector("#ppo-average-window");
 const ppoGraphs = [...document.querySelectorAll("[data-ppo-chart]")];
 const closeOptions = document.querySelector("#close-options");
 const optionsPanel = document.querySelector("#options-panel");
@@ -60,6 +61,7 @@ const damageMeter = {
   total: 0,
   windowSeconds: 5,
 };
+let ppoGraphAverageWindow = Number.parseInt(ppoAverageWindowInput?.value ?? "8", 10) || 8;
 
 startRun.addEventListener("click", () => {
   simulation = createSimulation();
@@ -85,6 +87,12 @@ closePpo.addEventListener("click", () => closePanel(ppoPanel, openPpo));
 startPpo.addEventListener("click", () => {
   ppoRunning = !ppoRunning;
   startPpo.textContent = ppoRunning ? "Pause" : "Start";
+});
+
+ppoAverageWindowInput?.addEventListener("change", () => {
+  ppoGraphAverageWindow = clampInteger(ppoAverageWindowInput.value, 1, 50, 8);
+  ppoAverageWindowInput.value = String(ppoGraphAverageWindow);
+  renderPpoPanel();
 });
 
 optionsPanel.addEventListener("click", (event) => {
@@ -386,15 +394,21 @@ function drawSinglePpoGraph(canvas, history, chart) {
   ctx.fillStyle = "rgba(3, 8, 18, 0.88)";
   ctx.fillRect(0, 0, width, height);
   const values = history.map((point) => point[chart.key] ?? 0);
+  const averageWindow = Math.max(1, ppoGraphAverageWindow);
+  const smoothedValues = rollingAverage(values, averageWindow);
+  const graphValues = smoothedValues.length ? smoothedValues : values;
+  const average = values.length ? mean(values.slice(-averageWindow)) : 0;
   const min = values.length ? Math.min(...values) : 0;
   const max = values.length ? Math.max(...values) : 1;
+  const graphMin = graphValues.length ? Math.min(...graphValues, average) : 0;
+  const graphMax = graphValues.length ? Math.max(...graphValues, average) : 1;
   ctx.font = "800 12px Inter, system-ui, sans-serif";
   ctx.fillStyle = chart.color;
-  ctx.fillText(chart.label, 14, 18);
+  ctx.fillText(`${chart.label} avg ${averageWindow}`, 14, 18);
   ctx.fillStyle = "#91a8bd";
   ctx.textAlign = "right";
-  ctx.fillText(`${formatGraphValue(max, chart.suffix)} max`, width - 14, 18);
-  ctx.fillText(`${formatGraphValue(min, chart.suffix)} min`, width - 14, height - 12);
+  ctx.fillText(`${formatGraphValue(average, chart.suffix)} avg`, width - 14, 18);
+  ctx.fillText(`${formatGraphValue(max, chart.suffix)} max / ${formatGraphValue(min, chart.suffix)} min`, width - 14, height - 12);
   ctx.textAlign = "left";
   ctx.strokeStyle = "rgba(100, 217, 255, 0.14)";
   for (let i = 0; i < 6; i += 1) {
@@ -404,23 +418,60 @@ function drawSinglePpoGraph(canvas, history, chart) {
     ctx.lineTo(width - 14, y);
     ctx.stroke();
   }
-  drawLine(ctx, history, chart.key, chart.color, width, height, chart.invert, min, max);
+  drawAverageReferenceLine(ctx, average, chart, width, height, graphMin, graphMax);
+  drawLine(ctx, graphValues, chart.color, width, height, chart.invert, graphMin, graphMax);
 }
 
-function drawLine(ctx, history, key, color, width, height, invert = false, min = 0, max = null) {
-  if (history.length < 2) return;
-  const range = Math.max(1, (max ?? Math.max(...history.map((point) => point[key]), 1)) - min);
+function drawLine(ctx, values, color, width, height, invert = false, min = 0, max = null) {
+  if (values.length < 2) return;
+  const range = Math.max(1, (max ?? Math.max(...values, 1)) - min);
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  history.forEach((point, index) => {
-    const x = 14 + ((width - 28) * index) / Math.max(1, history.length - 1);
-    const normalized = ((point[key] ?? 0) - min) / range;
+  values.forEach((value, index) => {
+    const x = 14 + ((width - 28) * index) / Math.max(1, values.length - 1);
+    const normalized = (value - min) / range;
     const y = invert ? 30 + (height - 56) * normalized : height - 26 - (height - 56) * normalized;
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
+}
+
+function drawAverageReferenceLine(ctx, average, chart, width, height, min, max) {
+  const range = Math.max(1, max - min);
+  const normalized = (average - min) / range;
+  const y = chart.invert ? 30 + (height - 56) * normalized : height - 26 - (height - 56) * normalized;
+  ctx.save();
+  ctx.strokeStyle = "rgba(237, 247, 255, 0.42)";
+  ctx.setLineDash([6, 5]);
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(14, y);
+  ctx.lineTo(width - 14, y);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(237, 247, 255, 0.72)";
+  ctx.font = "700 10px Inter, system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("avg", 16, Math.max(34, y - 5));
+  ctx.restore();
+}
+
+function rollingAverage(values, windowSize) {
+  return values.map((_, index) => {
+    const start = Math.max(0, index - windowSize + 1);
+    return mean(values.slice(start, index + 1));
+  });
+}
+
+function mean(values) {
+  return values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+}
+
+function clampInteger(value, min, max, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
 }
 
 function formatGraphValue(value, suffix) {
