@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "scripts": {
+    "balance:economy": "node scripts/economy-balance.mjs"
+  }
+}

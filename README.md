@@ -68,6 +68,20 @@ particles: true,
 - Scrap is awarded after runs from survival time, kills, wave reached, and salvage bonuses.
 - The PPO Lab runs a lightweight policy-gradient trainer against `GameSimulation` and tracks score, damage, kills, survival, and death rate per batch.
 
+## Economy Balance Script
+
+Run deterministic economy samples from the command line:
+
+```bash
+npm run balance:economy
+```
+
+The script uses `GameSimulation` with several fixed seeds, then prints survival, kills, wave, earned scrap, rough scrap per hour, and starter permanent-upgrade time estimates. You can override the defaults:
+
+```bash
+node scripts/economy-balance.mjs --seeds=101,202,303 --seconds=600
+```
+
 ## Architecture
 
 - `assets/space-survivors-sprites.png` is the generated transparent sprite sheet used by the game.
