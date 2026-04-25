@@ -49,24 +49,71 @@ export function createPlayer(id, x = 0, y = 0) {
   };
 }
 
-export function createEnemy(id, type, x, y, wave) {
-  const isBruiser = type === "bruiser";
-  return {
+export function createEnemy(id, type, x, y, wave, options = {}) {
+  const stats = enemyStats(type, wave);
+  const enemy = {
     id,
     kind: "enemy",
     type,
     x,
     y,
-    radius: isBruiser ? 22 : 15,
-    hp: (isBruiser ? 56 : 24) + wave * (isBruiser ? 8 : 3),
-    maxHp: (isBruiser ? 56 : 24) + wave * (isBruiser ? 8 : 3),
-    speed: (isBruiser ? 68 : 96) + wave * 3,
-    damage: isBruiser ? 14 : 7,
-    xp: isBruiser ? 5 : 2,
+    radius: stats.radius,
+    hp: stats.hp,
+    maxHp: stats.hp,
+    speed: stats.speed,
+    damage: stats.damage,
+    xp: stats.xp,
+    splitCount: stats.splitCount,
+    splitChildType: stats.splitChildType,
+    splitDepth: options.splitDepth ?? 0,
     hitFlash: 0,
     hitVx: 0,
     hitVy: 0,
   };
+
+  if (options.eliteAffix) {
+    applyEliteAffix(enemy, options.eliteAffix);
+  }
+
+  return enemy;
+}
+
+function enemyStats(type, wave) {
+  if (type === "bruiser") {
+    const hp = 56 + wave * 8;
+    return { radius: 22, hp, speed: 68 + wave * 3, damage: 14, xp: 5, splitCount: 0, splitChildType: null };
+  }
+  if (type === "splitter") {
+    const hp = 34 + wave * 5;
+    return { radius: 17, hp, speed: 86 + wave * 3, damage: 8, xp: 3, splitCount: 3, splitChildType: "shard" };
+  }
+  if (type === "shard") {
+    const hp = 10 + wave * 2;
+    return { radius: 10, hp, speed: 132 + wave * 4, damage: 5, xp: 1, splitCount: 0, splitChildType: null };
+  }
+
+  const hp = 24 + wave * 3;
+  return { radius: 15, hp, speed: 96 + wave * 3, damage: 7, xp: 2, splitCount: 0, splitChildType: null };
+}
+
+function applyEliteAffix(enemy, eliteAffix) {
+  enemy.eliteAffix = eliteAffix;
+  enemy.radius += 3;
+  enemy.xp += 3;
+
+  if (eliteAffix === "swift") {
+    enemy.speed *= 1.32;
+    enemy.damage += 3;
+    enemy.strafePhase = 0;
+    return;
+  }
+
+  if (eliteAffix === "armored") {
+    enemy.maxHp = Math.round(enemy.maxHp * 1.7);
+    enemy.hp = enemy.maxHp;
+    enemy.armor = 6;
+    enemy.speed *= 0.88;
+  }
 }
 
 export function createProjectile(id, ownerId, x, y, vx, vy, damage, radius = 5, ttl = 1.4, weapon = {}) {

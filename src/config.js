@@ -30,7 +30,7 @@ export const NETWORK = {
 export const TARGETING = {
   primaryWeapon: {
     strategy: "nearest",
-    enemyTypes: ["drone", "bruiser"],
+    enemyTypes: ["drone", "bruiser", "splitter", "shard"],
     maxRange: 1200,
     firingAngleDegrees: 8,
   },
