@@ -55,6 +55,7 @@ function applyHyperparams(trainer, options) {
     advantageClamp: ["advantageClamp", "adv-clamp"],
     killReward: ["killReward", "kill-reward"],
     xpReward: ["xpReward", "xp-reward"],
+    damageReward: ["damageReward", "damage-reward", "damage"],
     powerupReward: ["powerupReward", "powerup-reward"],
     damageTakenPenalty: ["damageTakenPenalty", "dmg-taken"],
     survivalBonus: ["survivalBonus", "survival-bonus"],

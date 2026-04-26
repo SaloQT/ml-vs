@@ -37,6 +37,7 @@ export class PpoTrainer {
     this.advantageClamp = 3;
     this.killReward = 7.5;
     this.xpReward = 0.08;
+    this.damageReward = 0.025;
     this.powerupReward = 0.7;
     this.damageTakenPenalty = 0.16;
     this.survivalBonus = 0.025;
@@ -148,7 +149,7 @@ export class PpoTrainer {
       const stepReward = scoring
         ? this.survivalBonus +
           (kills - previousKills) * this.killReward +
-          damageStep * 0.025 +
+          damageStep * this.damageReward +
           xpStep * this.xpReward +
           levelStep * 8 +
           scrapStep * 0.12 +
@@ -323,21 +324,44 @@ export class PpoTrainer {
     const player = sim.players.get(sim.localPlayerId);
     if (!player) return { moveX: 0, moveY: 0 };
     if (sim.state === "upgrade") {
-      this.chooseUpgrade(sim, Date.now() + sim.tick);
+      this.chooseUpgrade(sim, Date.now() + sim.tick, { greedy: true });
       return { moveX: 0, moveY: 0 };
     }
     const features = this.features(sim, player);
-    const { action } = this.sampleAction(features, Date.now() + sim.tick);
+    const probabilities = this.probabilities(features);
+    let action = 0;
+    let bestProbability = -Infinity;
+    for (let i = 0; i < probabilities.length; i += 1) {
+      if (probabilities[i] > bestProbability) {
+        bestProbability = probabilities[i];
+        action = i;
+      }
+    }
     const [moveX, moveY] = ACTIONS[action];
     return { moveX, moveY };
   }
 
-  chooseUpgrade(sim, seed = Date.now()) {
+  chooseUpgrade(sim, seed = Date.now(), { greedy = false } = {}) {
     if (sim.state !== "upgrade" || !sim.pendingUpgradeChoices?.length) return null;
     const player = sim.players.get(sim.localPlayerId);
     if (!player) return null;
     const choiceFeatures = this.upgradeChoiceFeatures(sim, player);
-    const { action, probability } = this.sampleUpgradeAction(choiceFeatures, seed);
+    let action;
+    let probability;
+    if (greedy) {
+      const probabilities = this.upgradeProbabilities(choiceFeatures);
+      let best = -Infinity;
+      action = 0;
+      for (let i = 0; i < probabilities.length; i += 1) {
+        if (probabilities[i] > best) {
+          best = probabilities[i];
+          action = i;
+        }
+      }
+      probability = probabilities[action];
+    } else {
+      ({ action, probability } = this.sampleUpgradeAction(choiceFeatures, seed));
+    }
     const upgrade = sim.pendingUpgradeChoices[action] ?? sim.pendingUpgradeChoices[0];
     if (!upgrade) return null;
     sim.chooseUpgrade(upgrade.id);
