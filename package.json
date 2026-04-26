@@ -1,6 +1,7 @@
 {
   "type": "module",
   "scripts": {
+    "serve": "node scripts/dev-server.mjs",
     "test": "node --test",
     "balance:economy": "node scripts/economy-balance.mjs",
     "benchmark:ppo": "node scripts/ppo-benchmark.mjs",

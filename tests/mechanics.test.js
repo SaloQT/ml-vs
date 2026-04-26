@@ -116,3 +116,61 @@ test("volatile affix creates a distinguishable burst and damages nearby players 
   assert.ok(player.hp < player.stats.maxHp);
   assert.ok([...simulation.effects.values()].some((effect) => effect.type === "volatileBurst"));
 });
+
+test("charger enemies lock into a burst line and cover extra ground", () => {
+  const simulation = new GameSimulation({ seed: 26 });
+  const player = resetArena(simulation);
+  player.x = 0;
+  player.y = 0;
+
+  const charger = createEnemy("charger-1", "charger", -220, 0, 5);
+  simulation.enemies.set(charger.id, charger);
+
+  simulation.updateEnemies(0.25);
+
+  assert.equal(charger.type, "charger");
+  assert.ok(charger.chargeFor > 0, "charger should enter its burst state inside charge range");
+  assert.ok(charger.chargeCooldown > 0, "charger should start a cooldown after committing");
+  assert.ok(charger.x > -220 + charger.speed * 0.25 * 2.5, "charge burst should move much faster than base speed");
+  assert.equal(Number(charger.chargeDirY.toFixed(6)), 0);
+});
+
+test("siphon enemies drain shields first, then heal from nearby players", () => {
+  const simulation = new GameSimulation({ seed: 27 });
+  const player = resetArena(simulation);
+  player.x = 0;
+  player.y = 0;
+  player.shield = 3;
+
+  const siphon = createEnemy("siphon-1", "siphon", 100, 0, 6);
+  simulation.enemies.set(siphon.id, siphon);
+  siphon.hp -= 20;
+  const damagedHp = siphon.hp;
+
+  simulation.updateEnemies(1);
+
+  assert.equal(player.shield, 0);
+  assert.equal(player.hp, player.stats.maxHp - 4);
+  assert.ok(siphon.hp > damagedHp, "siphon should convert the drain into healing");
+  assert.ok(siphon.hp <= siphon.maxHp);
+});
+
+test("warden enemies grant nearby allies an armor aura without shielding themselves", () => {
+  const simulation = new GameSimulation({ seed: 28 });
+  resetArena(simulation);
+
+  const warden = createEnemy("warden-1", "warden", 0, 0, 8);
+  const guarded = createEnemy("guarded-1", "drone", 120, 0, 8);
+  const isolated = createEnemy("isolated-1", "drone", 360, 0, 8);
+  simulation.enemies.set(warden.id, warden);
+  simulation.enemies.set(guarded.id, guarded);
+  simulation.enemies.set(isolated.id, isolated);
+
+  simulation.damageEnemy(guarded, 12, { ownerId: "p1", x: 90, y: 0, vx: 1, vy: 0 });
+  simulation.damageEnemy(isolated, 12, { ownerId: "p1", x: 330, y: 0, vx: 1, vy: 0 });
+  simulation.damageEnemy(warden, 12, { ownerId: "p1", x: -30, y: 0, vx: 1, vy: 0 });
+
+  assert.equal(guarded.hp, guarded.maxHp - 7);
+  assert.equal(isolated.hp, isolated.maxHp - 12);
+  assert.equal(warden.hp, warden.maxHp - 12);
+});

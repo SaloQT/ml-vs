@@ -13,6 +13,8 @@ test("equipment catalog includes expanded slot choices with display effects", ()
   assert.ok(EQUIPMENT.weapon.some((item) => item.id === "coil-repeater"));
   assert.ok(EQUIPMENT.weapon.some((item) => item.id === "ion-lance"));
   assert.ok(EQUIPMENT.weapon.some((item) => item.id === "flak-array"));
+  assert.ok(EQUIPMENT.weapon.some((item) => item.id === "prism-carbine"));
+  assert.ok(EQUIPMENT.weapon.some((item) => item.id === "nova-mortar"));
   assert.ok(EQUIPMENT.hull.some((item) => item.id === "interceptor-frame"));
   assert.ok(EQUIPMENT.hull.some((item) => item.id === "aegis-frame"));
   assert.ok(EQUIPMENT.hull.some((item) => item.id === "reactor-frame"));
@@ -26,6 +28,29 @@ test("equipment catalog includes expanded slot choices with display effects", ()
       assert.ok(item.effects.length > 0, `${item.id} should explain its stat effects`);
     }
   }
+});
+
+test("applyMetaProgress wires unique weapon mechanic stats and colors", () => {
+  const prismPlayer = createPlayer("prism");
+  applyMetaProgress(prismPlayer, { equipment: { weapon: "prism-carbine" } });
+
+  assert.equal(prismPlayer.stats.ricochetBounces, 2);
+  assert.equal(prismPlayer.stats.ricochetRange, 260);
+  assert.equal(prismPlayer.stats.ricochetDamageMultiplier, 0.72);
+  assert.equal(prismPlayer.stats.projectileColor, "#a78bfa");
+  approx(prismPlayer.stats.damage, 24 * 0.92);
+  approx(prismPlayer.stats.fireRate, 0.94);
+
+  const novaPlayer = createPlayer("nova");
+  applyMetaProgress(novaPlayer, { equipment: { weapon: "nova-mortar" } });
+
+  assert.equal(novaPlayer.stats.splashRadius, 96);
+  assert.equal(novaPlayer.stats.splashDamageMultiplier, 0.55);
+  assert.equal(novaPlayer.stats.projectileRadius, 8);
+  assert.equal(novaPlayer.stats.projectileColor, "#ffb020");
+  approx(novaPlayer.stats.damage, 24 * 1.24);
+  approx(novaPlayer.stats.fireRate, 0.7);
+  approx(novaPlayer.stats.projectileSpeed, 620 * 0.78);
 });
 
 test("normalizeMetaProgress keeps known new gear and falls back from invalid saved gear", () => {

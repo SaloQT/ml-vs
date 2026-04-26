@@ -51,6 +51,15 @@ export const UPGRADE_POOL = [
   statUpgrade("med-bay-protocol", "Med-Bay Protocol", "rare", "Bruisers are more likely to drop repair shields.", 3, (player) => {
     player.stats.repairDropBonus += 0.08;
   }),
+  statUpgrade("kinetic-capacitor", "Kinetic Capacitor", "rare", "Weapon hits gain up to 18% damage while moving at full thrust.", 3, (player) => {
+    player.stats.velocityDamageBonus += 0.18;
+  }),
+  statUpgrade("breaker-coils", "Breaker Coils", "rare", "Kills shave 0.08 seconds off the next weapon cooldown.", 4, (player) => {
+    player.stats.killCooldownRefund += 0.08;
+  }),
+  statUpgrade("impact-shielding", "Impact Shielding", "rare", "Shielded collisions discharge 18 damage into the attacker.", 3, (player) => {
+    player.stats.ramDamage += 18;
+  }),
   statUpgrade("gravity-well", "Gravity Well", "epic", "Every tenth shot creates a singularity burst.", 3, (player) => {
     player.stats.gravityWell += 1;
   }),
@@ -70,6 +79,9 @@ export const UPGRADE_POOL = [
   statUpgrade("singularity-array", "Singularity Array", "epic", "Energy effects grow 28% and pull harder.", 2, (player) => {
     player.stats.area *= 1.28;
     player.stats.gravityWell += 1;
+  }),
+  statUpgrade("last-stand-grid", "Last-Stand Grid", "epic", "Once per run, dropping below 35% hull grants a 45-point shield.", 1, (player) => {
+    player.stats.emergencyShield += 45;
   }),
 ];
 

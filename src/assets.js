@@ -38,6 +38,12 @@ export const ENEMY_SHEET = {
   },
 };
 
+export const ENEMY_IMAGES = {
+  enemyCharger: "./assets/enemy-sprites/charger.png",
+  enemySiphon: "./assets/enemy-sprites/siphon.png",
+  enemyWarden: "./assets/enemy-sprites/warden.png",
+};
+
 export const UI_SHEET = {
   src: "./assets/space-survivors-ui.png",
   width: SHEET_WIDTH,
@@ -62,6 +68,24 @@ export function loadSpriteSheet() {
 
 export function loadEnemySheet() {
   return loadSheet(ENEMY_SHEET);
+}
+
+export function loadEnemyImageSet() {
+  return Object.fromEntries(
+    Object.entries(ENEMY_IMAGES).map(([name, src]) => {
+      const image = new Image();
+      image.src = src;
+      return [
+        name,
+        {
+          image,
+          get ready() {
+            return image.complete && image.naturalWidth > 0;
+          },
+        },
+      ];
+    }),
+  );
 }
 
 export function loadUiSheet() {

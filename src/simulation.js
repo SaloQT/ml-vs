@@ -127,6 +127,16 @@ export class GameSimulation {
       if (player.stats.regen > 0 && player.hp < player.stats.maxHp * 0.7) {
         player.hp = Math.min(player.stats.maxHp, player.hp + player.stats.regen * dt);
       }
+      if (
+        player.stats.emergencyShield > 0 &&
+        !player.emergencyShieldUsed &&
+        player.hp > 0 &&
+        player.hp <= player.stats.maxHp * 0.35
+      ) {
+        player.shield = Math.max(player.shield ?? 0, player.stats.emergencyShield);
+        player.emergencyShieldUsed = true;
+        this.spawnCollectionEffect(player, "shield");
+      }
 
       const target = this._selectPrimaryTargetFast(player);
       let aimDx;
@@ -190,9 +200,16 @@ export class GameSimulation {
         player.stats.projectileTtl,
         {
           pierce: player.stats.projectilePierce,
+          color: player.stats.projectileColor,
+          glowColor: player.stats.projectileGlowColor,
           chainArcs: player.stats.chainArcs,
           chainRange: player.stats.chainRange,
           chainDamageMultiplier: player.stats.chainDamageMultiplier,
+          ricochetBounces: player.stats.ricochetBounces,
+          ricochetRange: player.stats.ricochetRange,
+          ricochetDamageMultiplier: player.stats.ricochetDamageMultiplier,
+          splashRadius: player.stats.splashRadius * player.stats.area,
+          splashDamageMultiplier: player.stats.splashDamageMultiplier,
         },
       );
       this.projectiles.set(projectile.id, projectile);
@@ -211,7 +228,9 @@ export class GameSimulation {
 
   rollDamage(player) {
     const crit = this.rng.next() < player.stats.critChance;
-    return player.stats.damage * (crit ? player.stats.critDamage : 1);
+    const speedRatio = Math.min(1, Math.hypot(player.vx ?? 0, player.vy ?? 0) / Math.max(1, this.playerSpeed(player)));
+    const velocityBonus = 1 + speedRatio * (player.stats.velocityDamageBonus ?? 0);
+    return player.stats.damage * velocityBonus * (crit ? player.stats.critDamage : 1);
   }
 
   primaryTargetFor(player) {
@@ -259,6 +278,9 @@ export class GameSimulation {
       const stalkerChance = this.wave >= 2 ? Math.min(0.05 + this.wave * 0.006, 0.13) : 0;
       const spitterChance = this.wave >= 4 ? Math.min(0.035 + this.wave * 0.005, 0.1) : 0;
       const bulwarkChance = this.wave >= 5 ? Math.min(0.025 + this.wave * 0.004, 0.08) : 0;
+      const chargerChance = this.wave >= 3 ? Math.min(0.045 + this.wave * 0.006, 0.13) : 0;
+      const siphonChance = this.wave >= 6 ? Math.min(0.025 + this.wave * 0.005, 0.09) : 0;
+      const wardenChance = this.wave >= 8 ? Math.min(0.018 + this.wave * 0.004, 0.07) : 0;
       const bruiserChance = Math.min(0.1 + this.wave * 0.015, 0.35);
       const type =
         typeRoll < splitterChance
@@ -269,9 +291,23 @@ export class GameSimulation {
               ? "spitter"
               : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance
                 ? "bulwark"
-                : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance + bruiserChance
-                  ? "bruiser"
-                  : "drone";
+                : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance + chargerChance
+                  ? "charger"
+                  : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance + chargerChance + siphonChance
+                    ? "siphon"
+                    : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance + chargerChance + siphonChance + wardenChance
+                      ? "warden"
+                      : typeRoll <
+                            splitterChance +
+                              stalkerChance +
+                              spitterChance +
+                              bulwarkChance +
+                              chargerChance +
+                              siphonChance +
+                              wardenChance +
+                              bruiserChance
+                        ? "bruiser"
+                        : "drone";
       const affixes = this.rollEnemyAffixes();
       const enemy = createEnemy(
         this.entityId(),
@@ -338,10 +374,26 @@ export class GameSimulation {
       const tlen = Math.hypot(tdx, tdy);
       let dirX = tlen ? tdx / tlen : 0;
       let dirY = tlen ? tdy / tlen : 0;
+      let speedMultiplier = 1;
       if (enemy._hastedFlag === undefined) {
         enemy._hastedFlag =
           (enemy.affixes && enemy.affixes.indexOf("hasted") >= 0) || enemy.eliteAffix === "swift";
         enemy._numericId = Number.parseInt(String(enemy.id).replace(/\D/g, ""), 10) || 0;
+      }
+      if (enemy.type === "charger") {
+        enemy.chargeCooldown = Math.max(0, (enemy.chargeCooldown ?? 0) - dt);
+        enemy.chargeFor = Math.max(0, (enemy.chargeFor ?? 0) - dt);
+        if (enemy.chargeFor > 0) {
+          dirX = enemy.chargeDirX ?? dirX;
+          dirY = enemy.chargeDirY ?? dirY;
+          speedMultiplier = 3.1;
+        } else if (tlen < 360 && enemy.chargeCooldown <= 0) {
+          enemy.chargeFor = 0.46;
+          enemy.chargeCooldown = 1.35;
+          enemy.chargeDirX = dirX;
+          enemy.chargeDirY = dirY;
+          speedMultiplier = 3.1;
+        }
       }
       if (enemy._hastedFlag) {
         enemy.strafePhase = (enemy.strafePhase ?? 0) + dt * 5.2;
@@ -357,7 +409,18 @@ export class GameSimulation {
           dirY = 0;
         }
       }
-      const moveScale = enemy.speed * dt;
+      if (enemy.type === "siphon" && tlen < 150 && enemy.hp > 0 && target.hp > 0) {
+        const drain = 7 * dt;
+        const shield = target.shield ?? 0;
+        const absorbed = Math.min(shield, drain);
+        target.shield = shield - absorbed;
+        const hpDrain = drain - absorbed;
+        if (hpDrain > 0) target.hp = Math.max(0, target.hp - hpDrain);
+        enemy.hp = Math.min(enemy.maxHp, enemy.hp + drain * 1.35);
+        speedMultiplier = 0.55;
+      }
+      if (enemy.type === "warden" && tlen < 260) speedMultiplier = 0.74;
+      const moveScale = enemy.speed * speedMultiplier * dt;
       enemy.x += dirX * moveScale + enemy.hitVx * dt;
       enemy.y += dirY * moveScale + enemy.hitVy * dt;
       enemy.hitVx *= decay;
@@ -376,6 +439,15 @@ export class GameSimulation {
           const remaining = target.hp - (incomingDamage - absorbed);
           target.hp = remaining > 0 ? remaining : 0;
           target.invulnerableFor = PLAYER_BASE.invulnerability;
+          if (absorbed > 0 && target.stats.ramDamage > 0) {
+            this.damageEnemy(enemy, target.stats.ramDamage, {
+              ownerId: target.id,
+              x: target.x,
+              y: target.y,
+              vx: enemy.x - target.x,
+              vy: enemy.y - target.y,
+            });
+          }
         }
         enemy.x -= dirX * 20;
         enemy.y -= dirY * 20;
@@ -409,7 +481,9 @@ export class GameSimulation {
         if (distanceSq(projectile.x, projectile.y, enemy.x, enemy.y) <= hitDistance * hitDistance) {
           projectile.hitEnemyIds?.push(enemy.id);
           this.damageEnemy(enemy, projectile.damage, projectile);
+          this.splashProjectileDamage(projectile, enemy);
           this.chainProjectileDamage(projectile, enemy);
+          if (this.ricochetProjectile(projectile, enemy)) break;
           if (projectile.pierce > 0) {
             projectile.pierce -= 1;
           } else {
@@ -490,7 +564,7 @@ export class GameSimulation {
     const sourceDirection = source ? normalize(source.vx ?? enemy.x - source.x, source.vy ?? enemy.y - source.y) : { x: 0, y: 0 };
     const hitX = source?.x ?? enemy.x;
     const hitY = source?.y ?? enemy.y;
-    enemy.hp -= Math.max(1, damage - (enemy.armor ?? 0));
+    enemy.hp -= Math.max(1, damage - (enemy.armor ?? 0) - this.enemyArmorAuraBonus(enemy));
     enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.12);
     enemy.hitVx = (enemy.hitVx ?? 0) + sourceDirection.x * 90;
     enemy.hitVy = (enemy.hitVy ?? 0) + sourceDirection.y * 90;
@@ -508,11 +582,26 @@ export class GameSimulation {
       }
     }
     if (!owner) owner = firstPlayer;
-    if (owner) owner.kills += 1;
+    if (owner) {
+      owner.kills += 1;
+      if (owner.stats.killCooldownRefund > 0) {
+        owner.cooldown = Math.max(0, owner.cooldown - owner.stats.killCooldownRefund);
+      }
+    }
     this.triggerEnemyDeathAffixes(enemy, owner);
     this.spawnSplitChildren(enemy);
     const pickup = this.createEnemyDrop(enemy, owner);
     this.pickups.set(pickup.id, pickup);
+  }
+
+  enemyArmorAuraBonus(enemy) {
+    if (!this.enemies.has(enemy.id)) return 0;
+    let bonus = 0;
+    for (const other of this.enemies.values()) {
+      if (other.id === enemy.id || other.type !== "warden" || other.hp <= 0) continue;
+      if (distanceSq(enemy.x, enemy.y, other.x, other.y) <= 190 * 190) bonus = Math.max(bonus, 5);
+    }
+    return bonus;
   }
 
   triggerEnemyDeathAffixes(enemy, owner = null) {
@@ -600,6 +689,38 @@ export class GameSimulation {
       });
       sourceEnemy = target;
     }
+  }
+
+  splashProjectileDamage(projectile, firstEnemy) {
+    if (!projectile.splashRadius || projectile.splashDamageMultiplier <= 0) return;
+    const radiusSq = projectile.splashRadius * projectile.splashRadius;
+    for (const enemy of this.enemies.values()) {
+      if (enemy.id === firstEnemy.id) continue;
+      if (distanceSq(firstEnemy.x, firstEnemy.y, enemy.x, enemy.y) > radiusSq) continue;
+      this.damageEnemy(enemy, projectile.damage * projectile.splashDamageMultiplier, {
+        ownerId: projectile.ownerId,
+        x: firstEnemy.x,
+        y: firstEnemy.y,
+        vx: enemy.x - firstEnemy.x,
+        vy: enemy.y - firstEnemy.y,
+      });
+    }
+  }
+
+  ricochetProjectile(projectile, firstEnemy) {
+    if (!projectile.ricochetBounces || !projectile.ricochetRange || projectile.ricochetDamageMultiplier <= 0) return false;
+    const target = this.nearestChainTarget(firstEnemy, new Set(projectile.hitEnemyIds ?? []), projectile.ricochetRange);
+    if (!target) return false;
+    const direction = normalize(target.x - firstEnemy.x, target.y - firstEnemy.y);
+    projectile.x = firstEnemy.x + direction.x * (firstEnemy.radius + projectile.radius + 2);
+    projectile.y = firstEnemy.y + direction.y * (firstEnemy.radius + projectile.radius + 2);
+    const speed = Math.hypot(projectile.vx, projectile.vy) || 1;
+    projectile.vx = direction.x * speed;
+    projectile.vy = direction.y * speed;
+    projectile.damage *= projectile.ricochetDamageMultiplier;
+    projectile.ricochetBounces -= 1;
+    projectile.ttl = Math.max(projectile.ttl, 0.18);
+    return true;
   }
 
   nearestChainTarget(sourceEnemy, excludedIds, range) {

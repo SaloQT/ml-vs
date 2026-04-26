@@ -20,7 +20,7 @@ body {
   width: 100%;
   height: 100%;
   margin: 0;
-  overflow: hidden;
+  overflow: visible;
   background: radial-gradient(circle at 45% 35%, #151c33 0%, #080b15 44%, #03050a 100%);
   color: var(--text);
   font-family:
@@ -579,29 +579,46 @@ body {
   border-color: rgba(100, 217, 255, 0.78);
 }
 
+.armory-command {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) minmax(220px, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
 .scrap-bank,
+.armory-status,
 .ppo-stats {
   display: grid;
-  grid-template-columns: repeat(6, minmax(92px, 1fr));
   gap: 8px;
+}
+
+.ppo-stats {
+  grid-template-columns: repeat(6, minmax(92px, 1fr));
   margin-bottom: 10px;
 }
 
 .scrap-bank,
+.armory-status,
 .ppo-stats div {
   padding: 12px;
-  border: 1px solid rgba(255, 200, 87, 0.28);
+  border: 1px solid rgba(100, 217, 255, 0.28);
   border-radius: 8px;
-  background: rgba(255, 200, 87, 0.08);
+  background:
+    linear-gradient(135deg, rgba(100, 217, 255, 0.14), rgba(255, 200, 87, 0.08)),
+    rgba(3, 8, 18, 0.8);
+  box-shadow: inset 0 0 22px rgba(100, 217, 255, 0.08);
 }
 
 .scrap-bank strong,
+.armory-status strong,
 .ppo-stats strong {
   display: block;
   font-size: 1.3rem;
 }
 
 .scrap-bank small,
+.armory-status span,
 .ppo-stats small {
   color: var(--muted);
   font-size: 0.72rem;
@@ -628,18 +645,22 @@ body {
 .equipment-slot {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .equipment-slot-header {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 12px;
   align-items: center;
-  min-height: 68px;
-  padding: 12px;
-  border: 1px solid rgba(255, 200, 87, 0.28);
+  min-height: 86px;
+  padding: 14px;
+  border: 1px solid rgba(255, 200, 87, 0.34);
   border-radius: 8px;
-  background: rgba(255, 200, 87, 0.08);
+  background:
+    linear-gradient(135deg, rgba(255, 200, 87, 0.16), rgba(100, 217, 255, 0.07)),
+    rgba(3, 8, 18, 0.82);
+  box-shadow: inset 0 0 24px rgba(255, 200, 87, 0.08), 0 12px 24px rgba(0, 0, 0, 0.18);
 }
 
 .equipment-slot-header div,
@@ -661,7 +682,15 @@ body {
 }
 
 .equipment-slot-header strong {
-  font-size: 1rem;
+  color: #f5fbff;
+  font-size: 1.08rem;
+}
+
+.equipment-slot-header small {
+  color: var(--amber);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
 }
 
 .equipment-slot-choices {
@@ -670,12 +699,16 @@ body {
 }
 
 .system-row {
+  position: relative;
   display: grid;
   gap: 8px;
   padding: 14px;
   border: 1px solid rgba(100, 217, 255, 0.2);
   border-radius: 8px;
-  background: rgba(3, 8, 18, 0.62);
+  background:
+    linear-gradient(160deg, rgba(12, 22, 39, 0.92), rgba(4, 9, 18, 0.86)),
+    rgba(3, 8, 18, 0.74);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .system-row strong {
@@ -691,11 +724,16 @@ body {
 
 .equipment-row {
   align-content: start;
+  min-height: 248px;
+  padding-top: 34px;
 }
 
 .equipment-row.equipped {
-  border-color: rgba(255, 200, 87, 0.42);
-  background: rgba(255, 200, 87, 0.1);
+  border-color: rgba(255, 200, 87, 0.58);
+  background:
+    linear-gradient(160deg, rgba(255, 200, 87, 0.16), rgba(100, 217, 255, 0.07)),
+    rgba(3, 8, 18, 0.86);
+  box-shadow: inset 0 0 28px rgba(255, 200, 87, 0.08), 0 0 22px rgba(255, 200, 87, 0.08);
 }
 
 .equipment-row-title,
@@ -721,17 +759,17 @@ body {
   background-color: rgba(3, 8, 18, 0.86);
   background-image:
     var(--equipment-icon),
-    radial-gradient(circle at 50% 44%, rgba(255, 255, 255, 0.18), transparent 38%),
-    linear-gradient(145deg, rgba(100, 217, 255, 0.18), rgba(255, 91, 121, 0.12));
+    linear-gradient(145deg, rgba(100, 217, 255, 0.16), rgba(255, 91, 121, 0.08));
   background-position: center;
   background-repeat: no-repeat;
-  background-size: 76%, 100% 100%, 100% 100%;
+  background-size: 78%, 100% 100%;
   box-shadow: inset 0 0 18px rgba(100, 217, 255, 0.08), 0 0 18px rgba(100, 217, 255, 0.08);
 }
 
 .equipment-slot-header .equipment-sprite {
-  width: 52px;
-  height: 52px;
+  width: 64px;
+  height: 64px;
+  background-size: 82%, 100% 100%;
 }
 
 .equipment-sprite-pulse-laser { --equipment-icon: url("./assets/armory-icons/pulse-laser-128.png"); }
@@ -740,6 +778,8 @@ body {
 .equipment-sprite-coil-repeater { --equipment-icon: url("./assets/armory-icons/coil-repeater-128.png"); }
 .equipment-sprite-ion-lance { --equipment-icon: url("./assets/armory-icons/ion-lance-128.png"); }
 .equipment-sprite-flak-array { --equipment-icon: url("./assets/armory-icons/flak-array-128.png"); }
+.equipment-sprite-prism-carbine { --equipment-icon: url("./assets/armory-icons/prism-carbine-128.png"); }
+.equipment-sprite-nova-mortar { --equipment-icon: url("./assets/armory-icons/nova-mortar-128.png"); }
 .equipment-sprite-scout-frame { --equipment-icon: url("./assets/armory-icons/scout-frame-128.png"); }
 .equipment-sprite-bulwark-frame { --equipment-icon: url("./assets/armory-icons/bulwark-frame-128.png"); }
 .equipment-sprite-standard-frame { --equipment-icon: url("./assets/armory-icons/standard-frame-128.png"); }
@@ -767,6 +807,55 @@ body {
   color: #c8d7e6;
   font-size: 0.78rem;
   line-height: 1.25;
+}
+
+.equipment-row li::marker {
+  color: var(--cyan);
+}
+
+.equipped-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 4px 8px;
+  border: 1px solid rgba(100, 217, 255, 0.28);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(3, 8, 18, 0.72);
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.equipment-row.equipped .equipped-badge {
+  border-color: rgba(255, 200, 87, 0.5);
+  color: var(--amber);
+}
+
+.upgrade-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(100, 217, 255, 0.12);
+}
+
+.upgrade-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--amber));
+}
+
+.armory-meta-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #c8d7e6;
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .system-row button {
@@ -1186,6 +1275,10 @@ body {
   .systems-list,
   .equipment-list,
   .ppo-graphs {
+    grid-template-columns: 1fr;
+  }
+
+  .armory-command {
     grid-template-columns: 1fr;
   }
 

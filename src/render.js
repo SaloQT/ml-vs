@@ -1,5 +1,5 @@
 import { GAME } from "./config.js";
-import { ENEMY_SHEET, loadEnemySheet, loadSpriteSheet, loadUiSheet, SPRITE_SHEET, UI_SHEET } from "./assets.js";
+import { ENEMY_SHEET, loadEnemyImageSet, loadEnemySheet, loadSpriteSheet, loadUiSheet, SPRITE_SHEET, UI_SHEET } from "./assets.js";
 import { clamp } from "./math.js";
 
 export class Renderer {
@@ -15,6 +15,7 @@ export class Renderer {
     this.camera = { x: 0, y: 0, scale: 1 };
     this.sprites = loadSpriteSheet();
     this.enemySprites = loadEnemySheet();
+    this.enemyImages = loadEnemyImageSet();
     this.uiSprites = loadUiSheet();
     this.stars = createStarfield(420);
     this.particles = [];
@@ -134,7 +135,7 @@ export class Renderer {
       this.drawGlow(pickup.x, pickup.y, style.glowRadius, style.glow);
     }
     for (const projectile of snapshot.projectiles) {
-      this.drawGlow(projectile.x, projectile.y, 46, "rgba(100, 225, 255, 0.42)");
+      this.drawGlow(projectile.x, projectile.y, projectile.splashRadius ? 58 : 46, projectile.glowColor ?? "rgba(100, 225, 255, 0.42)");
     }
     for (const enemy of snapshot.enemies) {
       this.drawGlow(enemy.x, enemy.y, enemyGlowRadius(enemy), enemyGlowColor(enemy));
@@ -309,8 +310,8 @@ export class Renderer {
     this.drawSprite("plasmaBolt", projectile.x, projectile.y, 52 * pulse, 26 * pulse, angle);
     ctx.restore();
     if (this.drawSprite("plasmaBolt", projectile.x, projectile.y, 38 * pulse, 19 * pulse, angle)) return;
-    ctx.strokeStyle = "#8ff3ff";
-    ctx.lineWidth = 5;
+    ctx.strokeStyle = projectile.color ?? "#8ff3ff";
+    ctx.lineWidth = projectile.splashRadius ? 8 : 5;
     ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(projectile.x, projectile.y);
@@ -1365,7 +1366,19 @@ export class Renderer {
 
   drawEnemySprite(name, x, y, width, height, rotation = 0) {
     if (SPRITE_SHEET.sprites[name]) return this.drawSprite(name, x, y, width, height, rotation);
+    const image = this.enemyImages[name];
+    if (image?.ready) return this.drawImageSprite(image.image, x, y, width, height, rotation);
     return this.drawSheetSprite(this.enemySprites, ENEMY_SHEET.sprites, name, x, y, width, height, rotation);
+  }
+
+  drawImageSprite(image, x, y, width, height, rotation = 0) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(x, y);
+    if (rotation) ctx.rotate(rotation);
+    ctx.drawImage(image, -width / 2, -height / 2, width, height);
+    ctx.restore();
+    return true;
   }
 
   drawSheetSprite(sheet, sprites, name, x, y, width, height, rotation = 0) {
@@ -1489,6 +1502,9 @@ function numericId(id) {
 function enemySpriteName(enemy) {
   if (enemy.type === "drone") return "enemyDrone";
   if (enemy.type === "bruiser") return "enemyBruiser";
+  if (enemy.type === "charger") return "enemyCharger";
+  if (enemy.type === "siphon") return "enemySiphon";
+  if (enemy.type === "warden") return "enemyWarden";
   if (enemy.type === "splitter") return "enemySplitter";
   if (enemy.type === "stalker") return "enemyStalker";
   if (enemy.type === "spitter") return "enemySpitter";
@@ -1500,6 +1516,9 @@ function enemySpriteName(enemy) {
 function enemyDrawWidth(enemy) {
   if (enemy.type === "bulwark") return 58;
   if (enemy.type === "bruiser") return 62;
+  if (enemy.type === "charger") return 50;
+  if (enemy.type === "siphon") return 48;
+  if (enemy.type === "warden") return 54;
   if (enemy.type === "splitter") return 48;
   if (enemy.type === "spitter") return 44;
   if (enemy.type === "stalker") return 38;
@@ -1510,6 +1529,9 @@ function enemyDrawWidth(enemy) {
 function enemyDrawHeight(enemy) {
   if (enemy.type === "bulwark") return 58;
   if (enemy.type === "bruiser") return 68;
+  if (enemy.type === "charger") return 40;
+  if (enemy.type === "siphon") return 52;
+  if (enemy.type === "warden") return 56;
   if (enemy.type === "splitter") return 46;
   if (enemy.type === "spitter") return 42;
   if (enemy.type === "stalker") return 44;
@@ -1520,6 +1542,9 @@ function enemyDrawHeight(enemy) {
 function enemyFillColor(enemy) {
   if (enemy.type === "bulwark") return "#7c88ff";
   if (enemy.type === "bruiser") return "#ab5cff";
+  if (enemy.type === "charger") return "#ff4d2e";
+  if (enemy.type === "siphon") return "#25d6ff";
+  if (enemy.type === "warden") return "#ffe36e";
   if (enemy.type === "stalker") return "#36f0b8";
   if (enemy.type === "spitter") return "#d7ff57";
   if (enemy.type === "splitter") return "#ff9a3d";
@@ -1534,6 +1559,9 @@ function enemyGlowColor(enemy) {
   if (enemy.affixes?.includes("hasted") || enemy.eliteAffix === "swift") return "rgba(255, 211, 92, 0.28)";
   if (enemy.type === "bulwark") return "rgba(124, 136, 255, 0.24)";
   if (enemy.type === "bruiser") return "rgba(184, 108, 255, 0.22)";
+  if (enemy.type === "charger") return "rgba(255, 77, 46, 0.24)";
+  if (enemy.type === "siphon") return "rgba(37, 214, 255, 0.24)";
+  if (enemy.type === "warden") return "rgba(255, 227, 110, 0.25)";
   if (enemy.type === "stalker") return "rgba(54, 240, 184, 0.2)";
   if (enemy.type === "spitter") return "rgba(215, 255, 87, 0.2)";
   if (enemy.type === "splitter" || enemy.type === "shard") return "rgba(255, 154, 61, 0.24)";
@@ -1544,6 +1572,9 @@ function enemyGlowRadius(enemy) {
   if (enemy.affixes?.length || enemy.eliteAffix) return enemy.type === "bruiser" || enemy.type === "bulwark" ? 98 : 70 + (enemy.affixes?.length ?? 1) * 8;
   if (enemy.type === "bulwark") return 82;
   if (enemy.type === "bruiser") return 76;
+  if (enemy.type === "charger") return 58;
+  if (enemy.type === "siphon") return 62;
+  if (enemy.type === "warden") return 72;
   if (enemy.type === "splitter") return 58;
   if (enemy.type === "stalker" || enemy.type === "spitter") return 52;
   if (enemy.type === "shard") return 36;

@@ -447,22 +447,32 @@ async function loadPpoModel() {
 
 function renderArmory() {
   document.querySelector("#scrap-count").textContent = String(metaProgress.scrap);
+  const slotTone = {
+    weapon: "Ballistic Control",
+    hull: "Frame Bay",
+    utility: "Support Rig",
+  };
   const permanentRoot = document.querySelector("#permanent-upgrades");
   permanentRoot.replaceChildren(
     ...PERMANENT_UPGRADES.map((upgrade) => {
       const level = metaProgress.upgrades[upgrade.id] ?? 0;
       const cost = upgradeCost(upgrade, level);
+      const progress = Math.round((level / upgrade.maxLevel) * 100);
       const row = document.createElement("div");
-      row.className = "system-row";
+      row.className = `system-row armory-upgrade-row${level >= upgrade.maxLevel ? " maxed" : ""}`;
       row.innerHTML = `
         <div class="system-row-title">
           <span class="equipment-sprite equipment-sprite-${upgrade.icon ?? upgrade.id}" aria-hidden="true"></span>
           <div>
-            <strong>${upgrade.name} ${level}/${upgrade.maxLevel}</strong>
+            <strong>${upgrade.name}</strong>
             <span>Permanent</span>
           </div>
         </div>
         <p>${upgrade.description}</p>
+        <div class="upgrade-progress" aria-label="${upgrade.name} level ${level} of ${upgrade.maxLevel}">
+          <span style="width: ${progress}%"></span>
+        </div>
+        <div class="armory-meta-line"><span>Level ${level}/${upgrade.maxLevel}</span><span>${level >= upgrade.maxLevel ? "Calibrated" : `${cost} scrap`}</span></div>
         <button type="button" ${level >= upgrade.maxLevel || metaProgress.scrap < cost ? "disabled" : ""}>
           ${level >= upgrade.maxLevel ? "Maxed" : `Upgrade ${cost}`}
         </button>
@@ -488,8 +498,9 @@ function renderArmory() {
         <div class="equipment-slot-header">
           <span class="equipment-sprite equipment-sprite-${currentItem.icon ?? currentItem.id}" aria-hidden="true"></span>
           <div>
-            <span>${EQUIPMENT_SLOTS[slot] ?? slot}</span>
+            <span>${slotTone[slot] ?? "Loadout Slot"}</span>
             <strong>${currentItem.name}</strong>
+            <small>${EQUIPMENT_SLOTS[slot] ?? slot} equipped</small>
           </div>
         </div>
       `;
@@ -501,11 +512,12 @@ function renderArmory() {
           const row = document.createElement("div");
           row.className = `system-row equipment-row${selected ? " equipped" : ""}`;
           row.innerHTML = `
+            <span class="equipped-badge">${selected ? "Equipped" : "Available"}</span>
             <div class="equipment-row-title">
               <span class="equipment-sprite equipment-sprite-${item.icon ?? item.id}" aria-hidden="true"></span>
               <div>
                 <strong>${item.name}</strong>
-                <span>${selected ? "Current" : EQUIPMENT_SLOTS[slot] ?? slot}</span>
+                <span>${EQUIPMENT_SLOTS[slot] ?? slot}</span>
               </div>
             </div>
             <p>${item.description}</p>

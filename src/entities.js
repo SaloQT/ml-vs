@@ -35,9 +35,16 @@ export function createPlayer(id, x = 0, y = 0) {
       projectileTtl: 1.4,
       projectiles: 1,
       projectilePierce: 0,
+      projectileColor: "#8ff3ff",
+      projectileGlowColor: "rgba(100, 225, 255, 0.42)",
       chainArcs: 0,
       chainRange: 170,
       chainDamageMultiplier: 0.45,
+      ricochetBounces: 0,
+      ricochetRange: 220,
+      ricochetDamageMultiplier: 0.72,
+      splashRadius: 0,
+      splashDamageMultiplier: 0,
       pickupRadius: PLAYER_BASE.pickupRadius,
       drones: 0,
       gravityWell: 0,
@@ -49,6 +56,10 @@ export function createPlayer(id, x = 0, y = 0) {
       area: 1,
       salvageBonus: 0,
       repairDropBonus: 0,
+      killCooldownRefund: 0,
+      velocityDamageBonus: 0,
+      emergencyShield: 0,
+      ramDamage: 0,
     },
   };
 }
@@ -89,6 +100,18 @@ export function createEnemy(id, type, x, y, wave, options = {}) {
 }
 
 function enemyStats(type, wave) {
+  if (type === "charger") {
+    const hp = 38 + wave * 5;
+    return { radius: 16, hp, speed: 82 + wave * 2, damage: 13, xp: 4, splitCount: 0, splitChildType: null };
+  }
+  if (type === "siphon") {
+    const hp = 42 + wave * 5;
+    return { radius: 18, hp, speed: 64 + wave * 2, damage: 8, xp: 5, splitCount: 0, splitChildType: null };
+  }
+  if (type === "warden") {
+    const hp = 64 + wave * 8;
+    return { radius: 21, hp, speed: 58 + wave * 2, damage: 10, xp: 6, splitCount: 0, splitChildType: null };
+  }
   if (type === "stalker") {
     const hp = 18 + wave * 3;
     return { radius: 13, hp, speed: 138 + wave * 4, damage: 9, xp: 3, splitCount: 0, splitChildType: null };
@@ -170,9 +193,16 @@ export function createProjectile(id, ownerId, x, y, vx, vy, damage, radius = 5, 
     damage,
     ttl,
     pierce: weapon.pierce ?? 0,
+    color: weapon.color ?? "#8ff3ff",
+    glowColor: weapon.glowColor ?? "rgba(100, 225, 255, 0.42)",
     chainArcs: weapon.chainArcs ?? 0,
     chainRange: weapon.chainRange ?? 0,
     chainDamageMultiplier: weapon.chainDamageMultiplier ?? 0,
+    ricochetBounces: weapon.ricochetBounces ?? 0,
+    ricochetRange: weapon.ricochetRange ?? 0,
+    ricochetDamageMultiplier: weapon.ricochetDamageMultiplier ?? 0,
+    splashRadius: weapon.splashRadius ?? 0,
+    splashDamageMultiplier: weapon.splashDamageMultiplier ?? 0,
     hitEnemyIds: [],
   };
 }

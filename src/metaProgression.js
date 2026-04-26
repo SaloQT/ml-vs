@@ -59,6 +59,25 @@ export const EQUIPMENT = {
       player.stats.damage *= 0.84;
       player.stats.projectileSpeed *= 0.88;
     }),
+    equipment("prism-carbine", "Prism Carbine", "Refraction rounds bend into nearby follow-up targets.", "weapon", "prism-carbine", ["+2 ricochets", "Ricochets deal 72% damage", "-8% damage", "-6% fire rate"], (player) => {
+      player.stats.ricochetBounces += 2;
+      player.stats.ricochetRange = Math.max(player.stats.ricochetRange, 260);
+      player.stats.ricochetDamageMultiplier = Math.max(player.stats.ricochetDamageMultiplier, 0.72);
+      player.stats.damage *= 0.92;
+      player.stats.fireRate *= 0.94;
+      player.stats.projectileColor = "#a78bfa";
+      player.stats.projectileGlowColor = "rgba(167, 139, 250, 0.46)";
+    }),
+    equipment("nova-mortar", "Nova Mortar", "Heavy plasma shells burst on impact.", "weapon", "nova-mortar", ["96px splash radius", "Splash deals 55% damage", "+24% damage", "-30% fire rate", "-22% projectile speed"], (player) => {
+      player.stats.splashRadius = Math.max(player.stats.splashRadius, 96);
+      player.stats.splashDamageMultiplier = Math.max(player.stats.splashDamageMultiplier, 0.55);
+      player.stats.projectileRadius += 3;
+      player.stats.damage *= 1.24;
+      player.stats.fireRate *= 0.7;
+      player.stats.projectileSpeed *= 0.78;
+      player.stats.projectileColor = "#ffb020";
+      player.stats.projectileGlowColor = "rgba(255, 176, 32, 0.46)";
+    }),
   ],
   hull: [
     equipment("scout-frame", "Scout Frame", "Fast frame with lighter plating.", "hull", "scout-frame", ["+8% speed", "-10 max hull"], (player) => {

@@ -158,3 +158,59 @@ test("chain kills preserve projectile owner kill and pickup semantics", () => {
   assert.equal(simulation.pickups.size, 1);
   assert.equal(player.hp, player.stats.maxHp);
 });
+
+test("ricochet projectile redirects to a fresh nearby target with reduced damage", () => {
+  const simulation = new GameSimulation({ seed: 21 });
+  const player = resetCombat(simulation);
+  addEnemy(simulation, "first", 100, 0, 20);
+  const bouncedTarget = addEnemy(simulation, "second", 150, 0, 30);
+  const excludedTarget = addEnemy(simulation, "already-hit", 190, 0, 30);
+  simulation.projectiles.set(
+    "projectile-1",
+    createProjectile("projectile-1", "p1", 100, 0, 100, 0, 20, 5, 1, {
+      ricochetBounces: 1,
+      ricochetRange: 120,
+      ricochetDamageMultiplier: 0.5,
+    }),
+  );
+
+  simulation.updateProjectiles(0);
+
+  const projectile = simulation.projectiles.get("projectile-1");
+  assert.ok(projectile);
+  assert.equal(simulation.enemies.has("first"), false);
+  assert.equal(projectile.damage, 10);
+  assert.equal(projectile.ricochetBounces, 0);
+  assert.ok(projectile.vx > 0);
+  assert.deepEqual(projectile.hitEnemyIds, ["first"]);
+
+  simulation.updateProjectiles(0.08);
+
+  assert.equal(bouncedTarget.hp, 20);
+  assert.equal(excludedTarget.hp, 30);
+  assert.equal(simulation.projectiles.has("projectile-1"), false);
+  assert.equal(player.kills, 1);
+});
+
+test("splash projectile damages nearby enemies without hitting distant enemies", () => {
+  const simulation = new GameSimulation({ seed: 22 });
+  const player = resetCombat(simulation);
+  addEnemy(simulation, "primary", 100, 0, 40);
+  const nearby = addEnemy(simulation, "nearby", 150, 0, 40);
+  const outside = addEnemy(simulation, "outside", 230, 0, 40);
+  simulation.projectiles.set(
+    "projectile-1",
+    createProjectile("projectile-1", "p1", 100, 0, 0, 0, 20, 8, 1, {
+      splashRadius: 96,
+      splashDamageMultiplier: 0.5,
+    }),
+  );
+
+  simulation.updateProjectiles(0);
+
+  assert.equal(nearby.hp, 30);
+  assert.equal(outside.hp, 40);
+  assert.equal(simulation.enemies.get("primary").hp, 20);
+  assert.equal(simulation.projectiles.has("projectile-1"), false);
+  assert.equal(player.kills, 0);
+});
