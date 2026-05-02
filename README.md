@@ -1,111 +1,127 @@
 # Space Survivors
 
-A small browser survival game inspired by Vampire Survivors, built as an extendable canvas simulation with multiplayer-friendly state boundaries.
+A browser-based arena survival game with deterministic simulation, persistent Armory progression, enemy/boss variety, timed overrun events, and an in-browser PPO training lab.
 
-## Run
+The project is intentionally lightweight: it is plain JavaScript modules, Canvas rendering, local assets, and Node's built-in test runner.
 
-Use any static file server from this folder:
+## Features
+
+- **Playable arena survivor loop**: move, aim, collect pickups, level up, choose upgrades, and survive escalating waves.
+- **30-minute victory and overrun mode**: normal runs can end in victory, while overrun mode keeps scaling difficulty past the standard run length.
+- **Bosses, elites, and special enemies**: splitters, spitters, bulwarks, chargers, siphons, wardens, rare affixes, scheduled bosses, boss portraits, and spawn telegraphs.
+- **Timed run events**: lane sweeps, reward caches, warning HUD, cache collapse effects, and deterministic event scheduling.
+- **Persistent Armory**: permanent upgrades with prestige-style progression, scrap economy, and equipment pages for weapons, hulls, and utility rigs.
+- **Weapon and upgrade depth**: pierce, chain lightning, ricochet, splash, shield mechanics, pickup modifiers, economy upgrades, and defensive panic tools.
+- **PPO Lab**: train and watch a lightweight policy-gradient agent using the same simulation rules as the player, including fixed-step timing and run events.
+- **Worker-backed PPO rollouts**: optional parallel browser workers for faster PPO batches.
+- **Deterministic tests and scripts**: Node test coverage for simulation, drops, weapons, gear, upgrades, run events, and PPO behavior.
+- **Static deploy ready**: serve it locally or upload the static files to Netlify Drop, GitHub Pages, or any static host.
+
+## Requirements
+
+- Node.js 20+ recommended.
+- A modern browser with JavaScript modules and Canvas support.
+- No npm dependencies are required for the current project.
+
+## Run Locally
+
+From the repo root:
+
+```bash
+npm run serve
+```
+
+Then open the URL printed by the dev server, usually:
+
+```text
+http://localhost:4173
+```
+
+You can also use any static file server:
 
 ```bash
 python3 -m http.server 4173
 ```
 
-Then open `http://localhost:4173`.
-
 ## Controls
 
-- Move with `WASD` or arrow keys.
-- Weapons auto-aim based on the targeting configuration.
-- Pick one of three upgrades when you level up.
-- Toggle the debug inspector with `F3` or the backquote key.
+- Move: `WASD` or arrow keys.
+- Aim: mouse, right stick, or auto-aim depending on input mode.
+- Upgrade selection: click an upgrade card when leveling pauses the run.
+- Debug inspector: `F3` or backquote.
+- Armory/PPO panels: available from the main menu.
 
-## Targeting
+## Testing
 
-Default targeting lives in `src/config.js`:
+Run the full suite:
 
-```js
-export const TARGETING = {
-  primaryWeapon: {
-    strategy: "nearest",
-    enemyTypes: ["drone", "bruiser", "splitter", "shard", "stalker", "bulwark", "spitter"],
-    maxRange: 1200,
-    firingAngleDegrees: 8,
-  },
-};
+```bash
+npm test
 ```
 
-Available strategies are `nearest`, `lowestHp`, `highestHp`, `highestThreat`, and `random`.
-`firingAngleDegrees` controls how closely the ship must face the selected target before it can fire.
-You can also override targeting when creating a simulation:
+The tests use Node's built-in test runner and cover deterministic simulation behavior, pickup/drop rules, weapon mechanics, Armory progression, run events, and PPO training paths.
 
-```js
-new GameSimulation({
-  targeting: {
-    primaryWeapon: {
-      strategy: "highestThreat",
-      enemyTypes: ["bruiser"],
-      maxRange: 1400,
-      firingAngleDegrees: 6,
-    },
-  },
-});
-```
+## PPO Training
 
-## Visual Options
-
-The main menu Options panel can toggle screen shake, lighting, and particles. Settings persist in `localStorage`.
-
-Defaults live in `src/config.js`:
-
-```js
-screenShake: true,
-lighting: true,
-particles: true,
-```
-
-## Progression And PPO
-
-- The Armory menu stores permanent upgrades, scrap, and equipped items in `localStorage`.
-- Equipment is split into weapon, hull, and utility slots. Each slot has several sidegrades with visible stat tradeoffs, and invalid saved equipment IDs fall back to the default loadout.
-- Scrap is awarded after runs from survival time, kills, wave reached, and salvage bonuses.
-- The PPO Lab runs a lightweight policy-gradient trainer against `GameSimulation` and tracks score, damage, kills, survival, and death rate per batch.
-- PPO training uses direct simulation state reads during episodes, normalized batch advantages, and an expanded deterministic feature vector for nearby enemies, pickups, health, shield, level progress, and temporary boosts.
-- Run deterministic PPO throughput and quality samples from the command line:
+Run deterministic PPO benchmarks:
 
 ```bash
 npm run ppo:benchmark -- --batches=6 --batch-size=4
 ```
 
-## Run Mechanics
+Run longer command-line training:
 
-- Weapon upgrades now include piercing Phase Lance bolts and Arc Conductor chain lightning.
-- Enemy waves can include splitters that burst into shards, stalkers, spitters, and bulwarks. Later waves add elite and rare monsters with stackable hasted, armored, regenerating, and volatile affixes; each affix has its own aura treatment.
-- Drops include XP, repair, scrap, shield, overdrive, magnet burst, and rare cache pickups.
+```bash
+npm run ppo:train -- --batches=20 --batch-size=8
+```
 
-## Economy Balance Script
+The browser PPO Lab can also train from the UI, export/import models, adjust reward weights, and use rollout workers.
 
-Run deterministic economy samples from the command line:
+## Economy Sampling
+
+Run deterministic economy samples:
 
 ```bash
 npm run balance:economy
 ```
 
-The script uses `GameSimulation` with several fixed seeds, then prints survival, kills, wave, earned scrap, rough scrap per hour, and starter permanent-upgrade time estimates. You can override the defaults:
+With custom seeds and duration:
 
 ```bash
 node scripts/economy-balance.mjs --seeds=101,202,303 --seconds=600
 ```
 
-## Architecture
+## Project Structure
 
-- `assets/space-survivors-sprites.png` is the generated transparent sprite sheet used by the game.
-- `assets/space-survivors-ui.png` is the generated transparent UI icon sheet used by the HUD and upgrade cards.
-- `src/assets.js` maps sprite sheet cells to named game assets.
-- `src/simulation.js` owns deterministic game state, ticks, inputs, snapshots, spawning, combat, pickups, and leveling.
-- `src/entities.js` contains entity factories for players, enemies, projectiles, and pickups.
-- `src/targeting.js` contains configurable auto-target selection for weapons.
-- `src/upgrades.js` defines rogue-like upgrade data and effects.
-- `src/input.js` translates browser input into player input frames.
-- `src/render.js` draws snapshots without mutating simulation state.
+- `index.html` - app shell and UI panels.
+- `styles.css` - game UI, menu, Armory, HUD, and lab styling.
+- `assets/` - sprite sheets, UI icons, Armory icons, enemy sprites, boss art, and portraits.
+- `src/simulation.js` - deterministic game state, spawning, combat, events, pickups, leveling, and snapshots.
+- `src/entities.js` - factories for players, enemies, projectiles, pickups, and effects.
+- `src/render.js` - Canvas rendering for world, HUD, bosses, telegraphs, and UI effects.
+- `src/input.js` - keyboard/mouse/gamepad input and target mode handling.
+- `src/upgrades.js` - in-run upgrade catalog and effects.
+- `src/metaProgression.js` - Armory economy, permanent upgrades, equipment, migration, and prestige helpers.
+- `src/ppoTrainer.js` - PPO model, rollout, reward shaping, import/export, and training logic.
+- `src/ppoWorkerPool.js` / `src/ppoRolloutWorker.js` - browser worker rollout support.
+- `scripts/` - local dev server, PPO CLI, benchmark, economy sampler, and asset helpers.
+- `tests/` - Node test suite.
 
-The multiplayer path is to keep `GameSimulation` authoritative on a host or server, submit per-player input frames through `applyInput`, and broadcast `getSnapshot` output at a lower snapshot rate.
+## Deployment
+
+This is a static app. Deploy these paths to any static host:
+
+```text
+index.html
+styles.css
+src/
+assets/
+```
+
+For Netlify Drop, zip or drag those files/folders from the repo root. Generated deployment folders such as `netlify-drop/` and `netlify-drop.zip` are intentionally ignored.
+
+## Notes
+
+- Save data lives in browser `localStorage`.
+- The simulation is built so browser play, PPO rollouts, tests, and future multiplayer/server work can share the same authoritative rules.
+- The repo does not include generated model output such as `ppo-model.json`.

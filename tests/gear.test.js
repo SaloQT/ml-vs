@@ -3,7 +3,13 @@ import test from "node:test";
 
 import { PLAYER_BASE } from "../src/config.js";
 import { createPlayer } from "../src/entities.js";
-import { applyMetaProgress, defaultMetaProgress, EQUIPMENT, normalizeMetaProgress } from "../src/metaProgression.js";
+import {
+  applyMetaProgress,
+  asymptoticEffect,
+  defaultMetaProgress,
+  EQUIPMENT,
+  normalizeMetaProgress,
+} from "../src/metaProgression.js";
 
 function approx(actual, expected, epsilon = 1e-9) {
   assert.ok(Math.abs(actual - expected) < epsilon, `expected ${actual} to be within ${epsilon} of ${expected}`);
@@ -90,12 +96,16 @@ test("applyMetaProgress applies new weapon hull and utility tradeoffs through pl
     },
   });
 
-  assert.equal(player.stats.maxHp, PLAYER_BASE.maxHp + 8 - 16);
+  const hullBonus = asymptoticEffect(1, 80, 0.13863);
+  const damageBonus = asymptoticEffect(2, 0.60, 0.12344);
+  const fireRateBonus = asymptoticEffect(3, 0.40, 0.23368);
+  const speedBonus = asymptoticEffect(1, 0.25, 0.28443);
+  assert.equal(player.stats.maxHp, PLAYER_BASE.maxHp + hullBonus - 16);
   assert.equal(player.hp, player.stats.maxHp);
   assert.equal(player.stats.armor, -1);
-  approx(player.stats.damage, 24 * (1 + 2 * 0.04) * 0.88 * 1.16);
-  approx(player.stats.fireRate, (1 + 3 * 0.035) * 1.28 * 1.1);
-  approx(player.stats.speed, PLAYER_BASE.speed * (1 + 1 * 0.025) * 0.96);
+  approx(player.stats.damage, 24 * (1 + damageBonus) * 0.88 * 1.16);
+  approx(player.stats.fireRate, (1 + fireRateBonus) * 1.28 * 1.1);
+  approx(player.stats.speed, PLAYER_BASE.speed * (1 + speedBonus) * 0.96);
   approx(player.stats.projectileSpeed, 620 * 0.92);
   assert.equal(player.stats.pickupRadius, PLAYER_BASE.pickupRadius + 20);
   assert.equal(player.stats.salvageBonus, 0.1);

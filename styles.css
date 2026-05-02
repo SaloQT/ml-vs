@@ -143,24 +143,25 @@ body {
   position: absolute;
   background-image: url("./assets/space-survivors-sprites.png");
   background-repeat: no-repeat;
-  background-size: 400% 200%;
   filter: drop-shadow(0 0 28px rgba(100, 217, 255, 0.5));
 }
 
 .menu-ship {
   width: min(42vw, 440px);
-  aspect-ratio: 1.15;
+  aspect-ratio: 283 / 245;
   right: min(9vw, 120px);
   top: 23vh;
-  background-position: 0 0;
+  background-size: 443.11% 511.84%;
+  background-position: 3.193% 31.616%;
   transform: rotate(-12deg);
   animation: ship-float 5s ease-in-out infinite;
 }
 
 .menu-drone {
   width: 120px;
-  aspect-ratio: 1;
-  background-position: 33.33% 0;
+  aspect-ratio: 263 / 230;
+  background-size: 476.81% 545.22%;
+  background-position: 31.685% 32.129%;
   filter: drop-shadow(0 0 22px rgba(255, 91, 121, 0.46));
   opacity: 0.86;
 }
@@ -219,11 +220,107 @@ body {
     0 10px 42px rgba(0, 0, 0, 0.55);
 }
 
+.menu-scrap-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+  padding: 8px 18px;
+  border: 1px solid rgba(255, 224, 164, 0.34);
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, rgba(255, 226, 174, 0.16), rgba(255, 151, 72, 0.07)),
+    rgba(10, 12, 18, 0.62);
+  box-shadow:
+    0 0 20px rgba(255, 205, 132, 0.16),
+    0 0 48px rgba(255, 151, 72, 0.08),
+    inset 0 0 16px rgba(255, 232, 190, 0.08);
+  color: var(--text);
+}
+
+.menu-scrap-badge .menu-scrap-glyph {
+  font-size: 1.05rem;
+  color: #ffe6b5;
+  text-shadow:
+    0 0 8px rgba(255, 230, 181, 0.72),
+    0 0 18px rgba(255, 162, 94, 0.36);
+}
+
+.menu-scrap-badge strong {
+  font-size: 1.18rem;
+  font-weight: 950;
+  color: #ffeed1;
+  letter-spacing: 0.02em;
+}
+
+.menu-scrap-badge small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+#open-armory .armory-scrap {
+  margin-left: 6px;
+  color: #f7d8aa;
+  font-weight: 900;
+}
+
+#open-armory.affordable {
+  border-color: rgba(255, 224, 164, 0.54);
+  color: #fff0d4;
+  box-shadow:
+    0 0 18px rgba(255, 205, 132, 0.22),
+    0 0 38px rgba(255, 151, 72, 0.10),
+    inset 0 0 12px rgba(255, 232, 190, 0.10);
+}
+
+#open-armory.affordable .armory-scrap {
+  color: #fff0d4;
+  text-shadow:
+    0 0 8px rgba(255, 238, 209, 0.68),
+    0 0 18px rgba(255, 177, 104, 0.34);
+}
+
 .menu-actions {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-top: 40px;
+  margin-top: 28px;
+}
+
+.launch-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.launch-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid rgba(145, 168, 189, 0.32);
+  border-radius: 8px;
+  background: rgba(5, 13, 27, 0.62);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.82;
+}
+
+.launch-secondary:hover,
+.launch-secondary:focus-visible {
+  outline: 1px solid rgba(237, 247, 255, 0.55);
+  outline-offset: 3px;
+  opacity: 1;
 }
 
 .launch-button,
@@ -350,6 +447,13 @@ body {
   backdrop-filter: blur(8px);
 }
 
+#armory-panel {
+  position: fixed;
+  align-items: start;
+  justify-items: center;
+  overflow: auto;
+}
+
 .ppo-layout {
   display: flex;
   align-items: flex-start;
@@ -363,6 +467,32 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   width: min(920px, 100%);
+}
+
+.armory-layout {
+  display: grid;
+  gap: 12px;
+  width: min(920px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+
+.armory-panel-header {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(360px, 1.2fr);
+  gap: 12px;
+  align-items: end;
+  padding: 4px 2px 0;
+}
+
+.armory-panel-header .options-title h2 {
+  margin-bottom: 0;
+}
+
+.armory-content-card.systems-card.wide {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
 }
 
 .ppo-sidebar {
@@ -424,6 +554,14 @@ body {
 .ppo-sidebar-row .ppo-spinner-btn {
   flex: 0 0 28px;
   width: 28px;
+}
+
+.ppo-checkbox-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  min-height: 30px;
+  padding-top: 2px;
 }
 
 .ppo-sidebar-row input {
@@ -583,7 +721,7 @@ body {
   display: grid;
   grid-template-columns: minmax(180px, 280px) minmax(220px, 1fr);
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 
 .scrap-bank,
@@ -627,6 +765,67 @@ body {
   text-transform: uppercase;
 }
 
+.armory-page-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid rgba(145, 168, 189, 0.18);
+  border-radius: 8px;
+  background: rgba(3, 8, 18, 0.42);
+}
+
+.armory-page-tabs button {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(145, 168, 189, 0.24);
+  border-radius: 8px;
+  background: rgba(5, 13, 27, 0.68);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.armory-page-tabs button:hover,
+.armory-page-tabs button:focus-visible {
+  border-color: rgba(255, 224, 164, 0.44);
+  color: #fff0d4;
+  outline: none;
+  box-shadow: 0 0 18px rgba(255, 205, 132, 0.14);
+}
+
+.armory-page-tabs button.active {
+  border-color: rgba(255, 224, 164, 0.58);
+  background:
+    linear-gradient(135deg, rgba(255, 226, 174, 0.16), rgba(255, 151, 72, 0.08)),
+    rgba(10, 12, 18, 0.74);
+  color: #fff0d4;
+  box-shadow:
+    0 0 20px rgba(255, 205, 132, 0.18),
+    inset 0 0 14px rgba(255, 232, 190, 0.08);
+}
+
+.armory-page-heading {
+  display: grid;
+  gap: 3px;
+  margin: 0 0 12px;
+}
+
+.armory-page-heading h3 {
+  margin: 0;
+}
+
+.armory-page-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .systems-list,
 .equipment-list {
   display: grid;
@@ -638,8 +837,13 @@ body {
 }
 
 .equipment-list {
-  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
+}
+
+.systems-list.hidden,
+.equipment-list.hidden {
+  display: none;
 }
 
 .equipment-slot {
@@ -695,6 +899,7 @@ body {
 
 .equipment-slot-choices {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
 }
 
@@ -833,6 +1038,49 @@ body {
   color: var(--amber);
 }
 
+.featured-badge {
+  display: inline-block;
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 200, 87, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 200, 87, 0.14);
+  color: var(--amber);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.armory-upgrade-row.featured {
+  border-color: rgba(255, 200, 87, 0.45);
+  box-shadow: 0 0 0 1px rgba(255, 200, 87, 0.18) inset;
+}
+
+.equipment-row.equipment-locked {
+  opacity: 0.55;
+  filter: grayscale(0.65);
+}
+
+.equipment-row.equipment-locked .equipped-badge {
+  border-color: rgba(255, 120, 120, 0.45);
+  color: #ff9f9f;
+}
+
+.equipment-lock-label {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border: 1px dashed rgba(255, 120, 120, 0.45);
+  border-radius: 6px;
+  background: rgba(40, 8, 8, 0.4);
+  color: #ffb8b8;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .upgrade-progress {
   height: 6px;
   overflow: hidden;
@@ -882,6 +1130,542 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+
+/* ---------- Armory redesign ---------- */
+.systems-card.armory-shell {
+  width: min(1080px, 100%);
+  max-height: min(820px, calc(100vh - 36px));
+  padding: 18px;
+  overflow: auto;
+}
+.armory-root {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  width: min(1180px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 4px;
+}
+#armory-panel {
+  align-items: start;
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+.armory-zone {
+  border: 1px solid rgba(100, 217, 255, 0.18);
+  border-radius: 10px;
+  padding: 14px;
+  background:
+    linear-gradient(160deg, rgba(12, 22, 39, 0.92), rgba(4, 9, 18, 0.86)),
+    rgba(3, 8, 18, 0.74);
+}
+.armory-zone-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.armory-zone-heading span {
+  font-size: 0.86rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.armory-zone-heading small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Header zone */
+.armory-header {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(220px, 1.4fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.armory-header-titles { display: grid; gap: 2px; }
+.armory-eyebrow {
+  color: var(--cyan);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.armory-header-titles h2 { margin: 0; font-size: 1.6rem; }
+.armory-scrap-pill {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 10px 18px;
+  border: 1px solid rgba(255, 200, 87, 0.4);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 200, 87, 0.18), rgba(100, 217, 255, 0.05));
+  color: var(--amber);
+}
+.armory-scrap-pill strong { font-size: 1.3rem; }
+.armory-scrap-pill small {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.featured-spotlight {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px 10px 12px;
+  border: 1px solid rgba(255, 200, 87, 0.5);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgba(255, 200, 87, 0.18), rgba(100, 217, 255, 0.08)),
+    rgba(3, 8, 18, 0.78);
+  box-shadow: 0 0 22px rgba(255, 200, 87, 0.18);
+  animation: armoryBreathe 3.4s ease-in-out infinite;
+}
+.featured-ribbon {
+  position: absolute;
+  top: -10px;
+  left: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--amber);
+  color: #1a1200;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.featured-body { display: grid; gap: 2px; min-width: 0; }
+.featured-label {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.featured-body strong { color: var(--amber); font-size: 1rem; }
+.featured-body small { color: var(--muted); font-size: 0.74rem; }
+.armory-cta {
+  padding: 12px 18px;
+  border: 1px solid rgba(100, 217, 255, 0.6);
+  border-radius: 10px;
+  background: rgba(100, 217, 255, 0.18);
+  color: var(--cyan);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.armory-cta:hover { background: rgba(100, 217, 255, 0.3); }
+@keyframes armoryBreathe {
+  0%, 100% { box-shadow: 0 0 18px rgba(255, 200, 87, 0.16); }
+  50% { box-shadow: 0 0 28px rgba(255, 200, 87, 0.34); }
+}
+
+/* Hangar zone */
+.armory-hangar-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.armory-hangar-card {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+}
+.armory-hangar-slot {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.armory-hangar-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.armory-stat-cell {
+  padding: 8px 10px;
+  border: 1px solid rgba(100, 217, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(3, 8, 18, 0.7);
+  display: grid;
+  gap: 2px;
+}
+.armory-stat-cell small {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.armory-stat-cell strong { color: var(--cyan); font-size: 1rem; }
+
+/* Body / preview rail */
+.armory-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 14px;
+  padding: 0;
+  background: none;
+  border: none;
+}
+.armory-systems,
+.armory-preview-rail {
+  border: 1px solid rgba(100, 217, 255, 0.18);
+  border-radius: 10px;
+  padding: 14px;
+  background:
+    linear-gradient(160deg, rgba(12, 22, 39, 0.92), rgba(4, 9, 18, 0.86)),
+    rgba(3, 8, 18, 0.74);
+}
+
+.armory-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.armory-tab {
+  padding: 6px 12px;
+  border: 1px solid rgba(100, 217, 255, 0.25);
+  border-radius: 999px;
+  background: rgba(3, 8, 18, 0.6);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.armory-tab.active {
+  border-color: rgba(100, 217, 255, 0.7);
+  background: rgba(100, 217, 255, 0.16);
+  color: var(--cyan);
+}
+
+.armory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.armory-grid-empty {
+  grid-column: 1 / -1;
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* Card base */
+.armory-card {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid rgba(100, 217, 255, 0.2);
+  border-radius: 10px;
+  background:
+    linear-gradient(160deg, rgba(12, 22, 39, 0.92), rgba(4, 9, 18, 0.86)),
+    rgba(3, 8, 18, 0.74);
+  outline: none;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+.armory-card:focus-visible {
+  border-color: rgba(100, 217, 255, 0.8);
+  box-shadow: 0 0 0 2px rgba(100, 217, 255, 0.4);
+}
+.armory-card.affordable {
+  border-left: 3px solid var(--cyan);
+  box-shadow: 0 0 18px rgba(100, 217, 255, 0.18);
+}
+.armory-card.featured {
+  border-color: rgba(255, 200, 87, 0.55);
+  animation: armoryBreathe 3.4s ease-in-out infinite;
+}
+.armory-card.locked {
+  filter: grayscale(0.55);
+  border-color: rgba(184, 108, 255, 0.5);
+}
+.armory-ribbon {
+  position: absolute;
+  top: -9px;
+  right: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--amber);
+  color: #1a1200;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.armory-card-head {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.armory-card-title { display: grid; gap: 2px; min-width: 0; }
+.armory-card-title strong { font-size: 0.98rem; }
+.armory-card-title span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.armory-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+.armory-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.armory-price {
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.armory-card.unaffordable .armory-price {
+  color: var(--red);
+}
+.armory-card-buy {
+  min-height: 36px;
+  border: 1px solid rgba(100, 217, 255, 0.4);
+  border-radius: 8px;
+  background: rgba(100, 217, 255, 0.16);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.armory-card-buy:disabled { opacity: 0.45; cursor: not-allowed; }
+.armory-card.featured .armory-card-buy {
+  border-color: rgba(255, 200, 87, 0.6);
+  background: rgba(255, 200, 87, 0.18);
+  color: var(--amber);
+}
+
+/* Prestige chips */
+.prestige-chip {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+}
+.prestige-chip.prestige-cyan { color: var(--cyan); background: rgba(100, 217, 255, 0.14); }
+.prestige-chip.prestige-amber { color: var(--amber); background: rgba(255, 200, 87, 0.16); }
+.prestige-chip.prestige-orange { color: #ff9648; background: rgba(255, 150, 72, 0.16); }
+.prestige-chip.prestige-gold { color: #ffd76a; background: rgba(255, 215, 106, 0.18); }
+.prestige-chip.prestige-violet { color: var(--violet); background: rgba(184, 108, 255, 0.14); }
+
+/* Preview rail */
+.armory-preview-rail { display: grid; align-content: start; }
+.armory-preview-inner { display: grid; gap: 10px; }
+.armory-preview-heading {
+  color: var(--cyan);
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.armory-preview-name { font-size: 1.05rem; }
+.armory-preview-deltas { display: grid; gap: 4px; }
+.armory-preview-delta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(3, 8, 18, 0.65);
+}
+.armory-preview-delta.gain { color: var(--cyan); }
+.armory-preview-delta.loss { color: var(--red); }
+.armory-preview-cost {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.armory-preview-cost strong { color: var(--amber); font-size: 0.9rem; }
+
+/* Equipment bay */
+.armory-equipment-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: 10px;
+}
+.armory-equipment-card { gap: 10px; }
+.armory-equipment-card.equipped { border-color: rgba(255, 200, 87, 0.5); }
+.armory-equipment-label {
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.armory-equipment-effects {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 3px;
+  color: #c8d7e6;
+  font-size: 0.78rem;
+}
+.armory-equipment-effects li::marker { color: var(--cyan); }
+.armory-equipment-deltas {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: center;
+  min-width: 110px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(3, 8, 18, 0.6);
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-align: center;
+}
+.armory-delta-chip {
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.armory-delta-chip.gain { color: var(--cyan); background: rgba(100, 217, 255, 0.14); }
+.armory-delta-chip.loss { color: var(--red); background: rgba(255, 91, 121, 0.14); }
+.armory-equipment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.armory-equipment-thumb {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px;
+  width: 92px;
+  border: 1px solid rgba(100, 217, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(3, 8, 18, 0.65);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+.armory-equipment-thumb small {
+  font-size: 0.68rem;
+  text-align: center;
+  color: var(--muted);
+}
+.armory-equipment-thumb.equipped {
+  border-color: rgba(255, 200, 87, 0.5);
+  background: rgba(255, 200, 87, 0.12);
+}
+.armory-equipment-thumb.hovered {
+  border-color: rgba(100, 217, 255, 0.7);
+  box-shadow: 0 0 12px rgba(100, 217, 255, 0.24);
+}
+.armory-equipment-thumb.locked { filter: grayscale(0.55); border-color: rgba(184, 108, 255, 0.4); }
+
+/* Footer */
+.armory-footer {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 14px;
+}
+.armory-footer button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(100, 217, 255, 0.32);
+  border-radius: 8px;
+  background: rgba(5, 13, 27, 0.72);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.armory-footer-reserve { display: grid; }
+.armory-footer-reserve small { color: var(--muted); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; }
+.armory-footer-reserve strong { color: var(--amber); font-size: 1rem; }
+.armory-footer-hint { color: var(--muted); font-size: 0.78rem; text-align: right; }
+
+/* Empty state */
+.armory-empty-overlay {
+  position: absolute;
+  inset: 80px 14px auto 14px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.armory-empty-card {
+  pointer-events: auto;
+  max-width: 460px;
+  padding: 22px;
+  border: 1px solid rgba(100, 217, 255, 0.6);
+  border-radius: 12px;
+  background: rgba(3, 8, 18, 0.94);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+  text-align: center;
+}
+.armory-empty-card h3 { margin: 0 0 10px; color: var(--cyan); letter-spacing: 0.08em; text-transform: uppercase; }
+.armory-empty-card ol { text-align: left; padding-left: 22px; color: var(--text); }
+.armory-empty-card ol li { margin-bottom: 6px; }
+
+/* Responsive */
+@media (max-width: 860px) {
+  .armory-body { grid-template-columns: minmax(0, 1fr); }
+  .armory-equipment-compare { grid-template-columns: minmax(0, 1fr); }
+  .armory-equipment-deltas { flex-direction: row; flex-wrap: wrap; min-width: 0; }
+  .armory-hangar-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .armory-hangar-cards { grid-template-columns: minmax(0, 1fr); }
+  .armory-header { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .armory-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+  .armory-tab { scroll-snap-align: start; flex: 0 0 auto; }
+}
+
 
 .ppo-graphs-header {
   display: flex;
@@ -994,6 +1778,12 @@ body {
 
 .ppo-average-control input { width: 46px; }
 .ppo-sidebar-row input { width: auto; }
+
+.ppo-checkbox-row input {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--cyan);
+}
 
 .ppo-tooltip {
   position: fixed;
@@ -1242,6 +2032,10 @@ body {
   .ppo-stats {
     grid-template-columns: repeat(3, minmax(92px, 1fr));
   }
+
+  .armory-panel-header {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1280,6 +2074,10 @@ body {
 
   .armory-command {
     grid-template-columns: 1fr;
+  }
+
+  .armory-page-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .ppo-stats {
@@ -1381,4 +2179,12 @@ body {
   background: rgba(100, 217, 255, 0.32);
   border: 2px solid rgba(237, 247, 255, 0.7);
   box-shadow: 0 0 16px rgba(100, 217, 255, 0.5);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0);
+  white-space: nowrap; border: 0;
 }

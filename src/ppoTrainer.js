@@ -1,4 +1,5 @@
 import { GAME } from "./config.js";
+import { normalize } from "./math.js";
 import { normalizeMetaProgress } from "./metaProgression.js";
 import { GameSimulation } from "./simulation.js";
 
@@ -13,18 +14,35 @@ const ACTIONS = [
   [-0.7, -0.7],
 ];
 
-const FEATURE_COUNT = 14;
+const AIM_TURN_DELTAS = [
+  0,
+  -Math.PI / 128,
+  Math.PI / 128,
+  -Math.PI / 32,
+  Math.PI / 32,
+  -Math.PI / 12,
+  Math.PI / 12,
+  -Math.PI / 6,
+  Math.PI / 6,
+  -Math.PI / 3,
+  Math.PI / 3,
+  Math.PI,
+];
+
+const FEATURE_COUNT = 18;
 const UPGRADE_FEATURE_COUNT = 15;
 const UPGRADE_CHOICE_COUNT = 3;
 const MODEL_FORMAT = "space-survivors-ppo";
-const MODEL_VERSION = 1;
-const STEP_DT = 1 / 30;
+const MODEL_VERSION = 2;
+const STEP_DT = GAME.fixedStep;
+const STEPS_PER_SECOND = Math.round(1 / STEP_DT);
 
 export class PpoTrainer {
   constructor({ metaProgress = null } = {}) {
     this.metaProgress = normalizeMetaProgress(metaProgress ?? {});
     this.iteration = 0;
     this.weights = initialWeights();
+    this.aimWeights = initialAimWeights();
     this.upgradeWeights = initialUpgradeWeights();
     this.history = [];
     this.running = false;
@@ -42,25 +60,60 @@ export class PpoTrainer {
     this.damageTakenPenalty = 0.16;
     this.survivalBonus = 0.025;
     this.deathPenalty = 35;
+    this.killStreakReward = 0;
+    this.killStreakWindowSeconds = 10;
+    this.enemyHealthMultiplier = 1;
+    this.enemySpeedMultiplier = 1;
+    this.enemySpawnMultiplier = 1;
+    this.filterDeathEpisodes = false;
   }
 
   trainBatch(batchSize = this.batchSize) {
-    const episodes = [];
     const startedAt = nowMs();
-    for (let i = 0; i < batchSize; i += 1) {
-      episodes.push(this.runEpisode(9000 + this.iteration * 97 + i));
-    }
+    const episodes = this.runEpisodeBatch(this.batchSeeds(batchSize));
     const elapsedMs = Math.max(0.001, nowMs() - startedAt);
+    return this.trainBatchFromEpisodes(episodes, elapsedMs);
+  }
 
-    const meanReward = mean(episodes.map((episode) => episode.reward));
-    const meanSeconds = mean(episodes.map((episode) => episode.seconds));
-    const meanKills = mean(episodes.map((episode) => episode.kills));
-    const meanDamage = mean(episodes.map((episode) => episode.damageDealt));
-    const meanDamageTaken = mean(episodes.map((episode) => episode.damageTaken));
-    const meanScore = mean(episodes.map((episode) => episode.score));
-    const deathRate = mean(episodes.map((episode) => (episode.dead ? 1 : 0))) * 100;
-    const ticks = episodes.reduce((sum, episode) => sum + Math.round(episode.seconds * 30), 0);
-    this.updatePolicy(episodes, meanReward);
+  batchSeeds(batchSize = this.batchSize) {
+    return Array.from({ length: batchSize }, (_, i) => 9000 + this.iteration * 97 + i);
+  }
+
+  runEpisodeBatch(seeds) {
+    return seeds.map((seed) => this.runEpisode(seed));
+  }
+
+  trainBatchFromEpisodes(episodes, elapsedMs = 0.001) {
+    let sumReward = 0;
+    let sumSeconds = 0;
+    let sumKills = 0;
+    let sumDamage = 0;
+    let sumDamageTaken = 0;
+    let sumScore = 0;
+    let sumDead = 0;
+    let ticks = 0;
+    const episodeCount = episodes.length;
+    for (let i = 0; i < episodeCount; i += 1) {
+      const episode = episodes[i];
+      sumReward += episode.reward;
+      sumSeconds += episode.seconds;
+      sumKills += episode.kills;
+      sumDamage += episode.damageDealt;
+      sumDamageTaken += episode.damageTaken;
+      sumScore += episode.score;
+      if (episode.dead) sumDead += 1;
+      ticks += Math.round(episode.seconds * STEPS_PER_SECOND);
+    }
+    const denom = Math.max(1, episodeCount);
+    const meanReward = sumReward / denom;
+    const meanSeconds = sumSeconds / denom;
+    const meanKills = sumKills / denom;
+    const meanDamage = sumDamage / denom;
+    const meanDamageTaken = sumDamageTaken / denom;
+    const meanScore = sumScore / denom;
+    const deathRate = (sumDead / denom) * 100;
+    const trainingEpisodes = this.filterDeathEpisodes ? episodes.filter((episode) => !episode.dead) : episodes;
+    this.updatePolicy(trainingEpisodes, mean(trainingEpisodes.map((episode) => episode.reward)));
     this.iteration += 1;
     const point = {
       iteration: this.iteration,
@@ -72,6 +125,7 @@ export class PpoTrainer {
       score: Math.round(meanScore),
       deathRate: Math.round(deathRate),
       episodes: episodes.length,
+      trainedEpisodes: trainingEpisodes.length,
       ticks,
       ticksPerSecond: Math.round(ticks / (elapsedMs / 1000)),
     };
@@ -79,8 +133,80 @@ export class PpoTrainer {
     return point;
   }
 
+  exportTrainingState() {
+    return {
+      model: this.exportModel(),
+      metaProgress: this.metaProgress,
+      hyperparameters: {
+        learningRate: this.learningRate,
+        clip: this.clip,
+        gamma: this.gamma,
+        batchSize: this.batchSize,
+        maxEpisodeSeconds: this.maxEpisodeSeconds,
+        warmupSeconds: this.warmupSeconds,
+        advantageClamp: this.advantageClamp,
+        killReward: this.killReward,
+        xpReward: this.xpReward,
+        damageReward: this.damageReward,
+        powerupReward: this.powerupReward,
+        damageTakenPenalty: this.damageTakenPenalty,
+        survivalBonus: this.survivalBonus,
+        deathPenalty: this.deathPenalty,
+        killStreakReward: this.killStreakReward,
+        killStreakWindowSeconds: this.killStreakWindowSeconds,
+        enemyHealthMultiplier: this.enemyHealthMultiplier,
+        enemySpeedMultiplier: this.enemySpeedMultiplier,
+        enemySpawnMultiplier: this.enemySpawnMultiplier,
+        filterDeathEpisodes: this.filterDeathEpisodes,
+      },
+    };
+  }
+
+  importTrainingState(state) {
+    if (state?.model) this.importModel(state.model);
+    this.metaProgress = normalizeMetaProgress(state?.metaProgress ?? this.metaProgress);
+    const hyperparameters = state?.hyperparameters ?? {};
+    for (const key of [
+      "learningRate",
+      "clip",
+      "gamma",
+      "batchSize",
+      "maxEpisodeSeconds",
+      "warmupSeconds",
+      "advantageClamp",
+      "killReward",
+      "xpReward",
+      "damageReward",
+      "powerupReward",
+      "damageTakenPenalty",
+      "survivalBonus",
+      "deathPenalty",
+      "killStreakReward",
+      "killStreakWindowSeconds",
+      "enemyHealthMultiplier",
+      "enemySpeedMultiplier",
+      "enemySpawnMultiplier",
+    ]) {
+      const value = Number(hyperparameters[key]);
+      if (Number.isFinite(value)) this[key] = value;
+    }
+    if (typeof hyperparameters.filterDeathEpisodes === "boolean") {
+      this.filterDeathEpisodes = hyperparameters.filterDeathEpisodes;
+    }
+    return this;
+  }
+
   runEpisode(seed) {
-    const sim = new GameSimulation({ seed, localPlayerId: "ppo", metaProgress: this.metaProgress });
+    const sim = new GameSimulation({
+      seed,
+      localPlayerId: "ppo",
+      metaProgress: this.metaProgress,
+      headless: true,
+      enableRunEvents: true,
+      enemyHealthMultiplier: this.enemyHealthMultiplier,
+      enemySpeedMultiplier: this.enemySpeedMultiplier,
+      enemySpawnMultiplier: this.enemySpawnMultiplier,
+    });
     const playerId = sim.localPlayerId;
     let previousKills = 0;
     let previousTotalEnemyHp = 0;
@@ -93,12 +219,14 @@ export class PpoTrainer {
     let killsScored = 0;
     let damageDealt = 0;
     let damageTaken = 0;
+    const recentKillTimes = [];
+    let recentKillHead = 0;
     const trajectory = [];
-    const warmupTicks = Math.max(0, Math.round(this.warmupSeconds * 30));
-    const maxTicks = warmupTicks + Math.max(1, Math.round(this.maxEpisodeSeconds * 30));
+    const warmupTicks = Math.max(0, Math.round(this.warmupSeconds * STEPS_PER_SECOND));
+    const maxTicks = warmupTicks + Math.max(1, Math.round(this.maxEpisodeSeconds * STEPS_PER_SECOND));
     let cachedEnemyHp = -1;
 
-    for (let tick = 0; tick < maxTicks && sim.state !== "gameover"; tick += 1) {
+    for (let tick = 0; tick < maxTicks && !isTerminalState(sim.state); tick += 1) {
       const player = sim.players.get(playerId);
       if (!player) break;
       const scoring = tick >= warmupTicks;
@@ -118,14 +246,18 @@ export class PpoTrainer {
       previousScrap = player.scrap ?? 0;
       const previousOverdrive = player.overdriveFor ?? 0;
       const previousMagnetBurst = player.magnetBurstFor ?? 0;
-      const features = this.features(sim, player);
+      const scan = this.featuresWithScan(sim, player);
+      const features = scan.features;
       const { action, probability } = this.sampleAction(features, seed + tick);
-      sim.applyInput(playerId, { moveX: ACTIONS[action][0], moveY: ACTIONS[action][1] });
+      const aimDecision = this.sampleAimAction(features, seed + tick * 37 + 17);
+      const aim = rotateAim(player.aimX ?? player.facingX ?? 1, player.aimY ?? player.facingY ?? 0, AIM_TURN_DELTAS[aimDecision.action] ?? 0);
+      sim.applyInput(playerId, { moveX: ACTIONS[action][0], moveY: ACTIONS[action][1], aimX: aim.x, aimY: aim.y });
       sim.step(STEP_DT);
 
       const nextPlayer = sim.players.get(playerId);
       const kills = nextPlayer?.kills ?? previousKills;
-      const currentTotalEnemyHp = totalEnemyHp(sim.enemies);
+      const post = postStepEnemyScan(nextPlayer, sim.enemies);
+      const currentTotalEnemyHp = post.totalHp;
       cachedEnemyHp = currentTotalEnemyHp;
       const damageStep = Math.max(0, previousTotalEnemyHp - currentTotalEnemyHp);
       const takenStep = Math.max(0, previousHp - (nextPlayer?.hp ?? 0));
@@ -138,14 +270,26 @@ export class PpoTrainer {
         Math.max(0, (nextPlayer?.magnetBurstFor ?? 0) - previousMagnetBurst) +
         (shieldStep > 0 ? 1 : 0) +
         (scrapStep > 0 ? 1 : 0);
+      const killsDelta = Math.max(0, kills - previousKills);
       if (scoring) {
-        killsScored += Math.max(0, kills - previousKills);
+        killsScored += killsDelta;
         damageDealt += damageStep;
         damageTaken += takenStep;
       }
+      let killStreakBonus = 0;
+      if (killsDelta > 0 && this.killStreakReward > 0 && this.killStreakWindowSeconds > 0) {
+        const windowStart = sim.elapsed - this.killStreakWindowSeconds;
+        while (recentKillHead < recentKillTimes.length && recentKillTimes[recentKillHead] < windowStart) {
+          recentKillHead += 1;
+        }
+        for (let k = 0; k < killsDelta; k += 1) {
+          recentKillTimes.push(sim.elapsed);
+          const inWindow = recentKillTimes.length - recentKillHead;
+          killStreakBonus += this.killStreakReward * inWindow;
+        }
+      }
       const healthRatio = nextPlayer ? nextPlayer.hp / nextPlayer.stats.maxHp : 0;
-      const enemyPressure = nearestDistanceSq(nextPlayer, sim.enemies);
-      const closeEnemyPenalty = enemyPressure < 150 ** 2 ? 0.055 : 0;
+      const closeEnemyPenalty = post.nearestDistSq < 22500 ? 0.055 : 0;
       const stepReward = scoring
         ? this.survivalBonus +
           (kills - previousKills) * this.killReward +
@@ -153,7 +297,8 @@ export class PpoTrainer {
           xpStep * this.xpReward +
           levelStep * 8 +
           scrapStep * 0.12 +
-          powerupStep * this.powerupReward -
+          powerupStep * this.powerupReward +
+          killStreakBonus -
           takenStep * this.damageTakenPenalty -
           closeEnemyPenalty +
           healthRatio * 0.01
@@ -161,7 +306,16 @@ export class PpoTrainer {
       if (scoring) reward += stepReward;
       previousKills = kills;
       previousHp = nextPlayer?.hp ?? 0;
-      if (scoring) trajectory.push({ kind: "move", features, action, probability, reward: stepReward });
+      if (scoring) {
+        trajectory.push({ kind: "move", features, action, probability, reward: stepReward });
+        trajectory.push({
+          kind: "aim",
+          features,
+          action: aimDecision.action,
+          probability: aimDecision.probability,
+          reward: stepReward,
+        });
+      }
       if (sim.state === "upgrade") {
         const decision = this.chooseUpgrade(sim, seed + tick * 997 + 1);
         if (decision && scoring) trajectory.push({ kind: "upgrade", ...decision, reward: 0 });
@@ -170,11 +324,17 @@ export class PpoTrainer {
     }
 
     const player = sim.players.get(playerId);
+    const victory = sim.state === "victory";
     const dead = sim.state === "gameover" || (player?.hp ?? 0) <= 0;
     const scoredSeconds = Math.max(0, sim.elapsed - this.warmupSeconds);
     const countedDead = dead && scoredSeconds > 0;
     const score = scoredSeconds * 10 + killsScored * 45 + damageDealt * 0.35 - damageTaken * 2 + (player?.level ?? 1) * 100;
-    reward += scoredSeconds * 0.25 + (player?.level ?? 1) * 14 + (player?.scrap ?? 0) * 0.2 - (countedDead ? this.deathPenalty : 0);
+    reward +=
+      scoredSeconds * 0.25 +
+      (player?.level ?? 1) * 14 +
+      (player?.scrap ?? 0) * 0.2 +
+      (victory ? 100 : 0) -
+      (countedDead ? this.deathPenalty : 0);
     return {
       reward,
       seconds: scoredSeconds,
@@ -182,8 +342,14 @@ export class PpoTrainer {
       damageDealt,
       damageTaken,
       dead: countedDead,
+      victory,
+      outcome: sim.outcome,
       score,
       trajectory,
+      runEventsEnabled: sim.runEvents.enabled,
+      runEventsTriggered: sim.runEvents.sequence,
+      stepDt: STEP_DT,
+      tickRate: STEPS_PER_SECOND,
     };
   }
 
@@ -191,6 +357,7 @@ export class PpoTrainer {
     const learningRate = this.learningRate;
     const clip = this.clip;
     const movementSteps = [];
+    const aimSteps = [];
     const upgradeSteps = [];
     for (const episode of episodes) {
       let returnSoFar = episode.dead ? -this.deathPenalty * 0.23 : 0;
@@ -201,10 +368,12 @@ export class PpoTrainer {
       }
       for (const step of episode.trajectory) {
         if (step.kind === "upgrade") upgradeSteps.push(step);
+        else if (step.kind === "aim") aimSteps.push(step);
         else movementSteps.push(step);
       }
     }
     this.updateStepPolicy(movementSteps, this.weights, (features) => this.probabilities(features), learningRate, clip);
+    this.updateStepPolicy(aimSteps, this.aimWeights, (features) => this.aimProbabilities(features), learningRate, clip);
     this.updateUpgradePolicy(upgradeSteps, learningRate, clip);
   }
 
@@ -289,19 +458,65 @@ export class PpoTrainer {
     }
   }
 
+  featuresWithScan(source, player) {
+    const px = player.x;
+    const py = player.y;
+    let nearestEnemy = null;
+    let nearestEnemyDistSq = Infinity;
+    const enemies = source.enemies;
+    if (enemies?.values) {
+      for (const e of enemies.values()) {
+        const dx = e.x - px;
+        const dy = e.y - py;
+        const d = dx * dx + dy * dy;
+        if (d < nearestEnemyDistSq) {
+          nearestEnemyDistSq = d;
+          nearestEnemy = e;
+        }
+      }
+    }
+    let nearestPickup = null;
+    let nearestPickupDistSq = Infinity;
+    const pickups = source.pickups;
+    if (pickups?.values) {
+      for (const p of pickups.values()) {
+        const dx = p.x - px;
+        const dy = p.y - py;
+        const d = dx * dx + dy * dy;
+        if (d < nearestPickupDistSq) {
+          nearestPickupDistSq = d;
+          nearestPickup = p;
+        }
+      }
+    }
+    const features = this._buildFeatures(source, player, nearestEnemy, nearestEnemyDistSq, nearestPickup, nearestPickupDistSq);
+    return { features, nearestEnemy, nearestEnemyDistSq, nearestPickup, nearestPickupDistSq };
+  }
+
   features(source, player) {
-    const enemies = iterableValues(source.enemies);
-    const pickups = iterableValues(source.pickups);
-    const enemyResult = nearestWithDistSq(player, enemies);
-    const pickupResult = nearestWithDistSq(player, pickups);
-    const nearestEnemy = enemyResult.item;
-    const nearestPickup = pickupResult.item;
-    const nearestEnemyDistance = nearestEnemy ? Math.sqrt(enemyResult.distSq) : 1200;
-    const nearestPickupDistance = nearestPickup ? Math.sqrt(pickupResult.distSq) : 900;
+    return this.featuresWithScan(source, player).features;
+  }
+
+  _buildFeatures(source, player, nearestEnemy, nearestEnemyDistSq, nearestPickup, nearestPickupDistSq) {
+    const nearestEnemyDistance = nearestEnemy ? Math.sqrt(nearestEnemyDistSq) : 1200;
+    const nearestPickupDistance = nearestPickup ? Math.sqrt(nearestPickupDistSq) : 900;
     const maxHp = Math.max(1, player.stats.maxHp);
     const nextLevelXp = Math.max(1, player.nextLevelXp);
     const enemyCount = source.enemies?.size ?? source.enemies?.length ?? 0;
     const pickupCount = source.pickups?.size ?? source.pickups?.length ?? 0;
+    const aimX = player.aimX ?? player.facingX ?? 1;
+    const aimY = player.aimY ?? player.facingY ?? 0;
+    const aimLen = Math.hypot(aimX, aimY) || 1;
+    const aimNx = aimX / aimLen;
+    const aimNy = aimY / aimLen;
+    let alignment = 0;
+    let cross = 0;
+    if (nearestEnemy && nearestEnemyDistance > 0.0001) {
+      const ndx = (nearestEnemy.x - player.x) / nearestEnemyDistance;
+      const ndy = (nearestEnemy.y - player.y) / nearestEnemyDistance;
+      alignment = aimNx * ndx + aimNy * ndy;
+      cross = aimNx * ndy - aimNy * ndx;
+    }
     return [
       1,
       clamp01(player.hp / maxHp),
@@ -317,6 +532,10 @@ export class PpoTrainer {
       clamp01(player.xp / nextLevelXp),
       clamp01((player.level - 1) / 8),
       clamp01((player.overdriveFor ?? 0) / 5),
+      clampSigned(aimNx),
+      clampSigned(aimNy),
+      clampSigned(alignment),
+      clampSigned(cross),
     ];
   }
 
@@ -325,7 +544,7 @@ export class PpoTrainer {
     if (!player) return { moveX: 0, moveY: 0 };
     if (sim.state === "upgrade") {
       this.chooseUpgrade(sim, Date.now() + sim.tick, { greedy: true });
-      return { moveX: 0, moveY: 0 };
+      return { moveX: 0, moveY: 0, aimX: player.aimX ?? player.facingX ?? 1, aimY: player.aimY ?? player.facingY ?? 0 };
     }
     const features = this.features(sim, player);
     const probabilities = this.probabilities(features);
@@ -338,7 +557,13 @@ export class PpoTrainer {
       }
     }
     const [moveX, moveY] = ACTIONS[action];
-    return { moveX, moveY };
+    const aimAction = this.greedyAimAction(features);
+    const aim = rotateAim(
+      player.aimX ?? player.facingX ?? 1,
+      player.aimY ?? player.facingY ?? 0,
+      AIM_TURN_DELTAS[aimAction] ?? 0,
+    );
+    return { moveX, moveY, aimX: aim.x, aimY: aim.y };
   }
 
   chooseUpgrade(sim, seed = Date.now(), { greedy = false } = {}) {
@@ -393,6 +618,31 @@ export class PpoTrainer {
     return { action: probabilities.length - 1, probability: probabilities.at(-1) };
   }
 
+  sampleAimAction(features, seed) {
+    const probabilities = this.aimProbabilities(features);
+    const random = seeded(seed);
+    let roll = random;
+    for (let i = 0; i < probabilities.length; i += 1) {
+      roll -= probabilities[i];
+      if (roll <= 0) return { action: i, probability: probabilities[i] };
+    }
+    return { action: probabilities.length - 1, probability: probabilities.at(-1) };
+  }
+
+  greedyAimAction(features) {
+    const probabilities = this.aimProbabilities(features);
+    let action = 0;
+    let bestProbability = -Infinity;
+    for (let i = 0; i < probabilities.length; i += 1) {
+      if (probabilities[i] > bestProbability) {
+        bestProbability = probabilities[i];
+        action = i;
+      }
+    }
+    return action;
+  }
+
+
   probabilities(features) {
     this.ensureWeightsForFeatureCount(features.length);
     const weights = this.weights;
@@ -412,6 +662,11 @@ export class PpoTrainer {
     }
     for (let i = 0; i < n; i += 1) out[i] /= total;
     return out;
+  }
+
+  aimProbabilities(features) {
+    this.ensureAimWeightsForFeatureCount(features.length);
+    return softmaxRows(this.aimWeights, features);
   }
 
   upgradeProbabilities(choiceFeatures) {
@@ -462,6 +717,12 @@ export class PpoTrainer {
     }
   }
 
+  ensureAimWeightsForFeatureCount(featureCount) {
+    for (const weights of this.aimWeights) {
+      while (weights.length < featureCount) weights.push(0);
+    }
+  }
+
   exportModel() {
     return {
       format: MODEL_FORMAT,
@@ -470,9 +731,11 @@ export class PpoTrainer {
       iteration: this.iteration,
       featureCount: this.weights[0]?.length ?? FEATURE_COUNT,
       actionCount: ACTIONS.length,
+      aimActionCount: AIM_TURN_DELTAS.length,
       upgradeFeatureCount: this.upgradeWeights[0]?.length ?? UPGRADE_FEATURE_COUNT,
       upgradeActionCount: UPGRADE_CHOICE_COUNT,
       weights: this.weights.map((row) => [...row]),
+      aimWeights: this.aimWeights.map((row) => [...row]),
       upgradeWeights: this.upgradeWeights.map((row) => [...row]),
       history: this.history.map((point) => ({ ...point })),
     };
@@ -482,50 +745,25 @@ export class PpoTrainer {
     const normalized = normalizeModel(model);
     this.iteration = normalized.iteration;
     this.weights = normalized.weights;
+    this.aimWeights = normalized.aimWeights;
     this.upgradeWeights = normalized.upgradeWeights;
     this.history = normalized.history;
     return this;
   }
 }
 
+function isTerminalState(state) {
+  return state === "gameover" || state === "victory";
+}
+
 PpoTrainer.MODEL_FORMAT = MODEL_FORMAT;
 PpoTrainer.MODEL_VERSION = MODEL_VERSION;
 
-function nearest(origin, items) {
-  return nearestWithDistSq(origin, items).item;
-}
-
-function nearestWithDistSq(origin, items) {
-  let best = null;
-  let bestDistance = Infinity;
-  const ox = origin.x;
-  const oy = origin.y;
-  for (const item of items) {
-    const dx = item.x - ox;
-    const dy = item.y - oy;
-    const dist = dx * dx + dy * dy;
-    if (dist < bestDistance) {
-      bestDistance = dist;
-      best = item;
-    }
-  }
-  return { item: best, distSq: bestDistance };
-}
-
-function nearestDistanceSq(origin, items) {
-  if (!origin) return Infinity;
-  let best = Infinity;
-  for (const item of items.values()) {
-    const dx = item.x - origin.x;
-    const dy = item.y - origin.y;
-    const dist = dx * dx + dy * dy;
-    if (dist < best) best = dist;
-  }
-  return best;
-}
-
-function iterableValues(items) {
-  return typeof items?.values === "function" ? items.values() : items ?? [];
+function rotateAim(x, y, delta) {
+  const base = normalize(x, y);
+  const cos = Math.cos(delta);
+  const sin = Math.sin(delta);
+  return normalize(base.x * cos - base.y * sin, base.x * sin + base.y * cos);
 }
 
 function dot(a, b) {
@@ -540,6 +778,26 @@ function mean(values) {
   const n = values.length;
   for (let i = 0; i < n; i += 1) sum += values[i];
   return sum / Math.max(1, n);
+}
+
+function postStepEnemyScan(player, enemies) {
+  let totalHp = 0;
+  let nearestDistSq = Infinity;
+  if (!enemies?.values) return { totalHp, nearestDistSq };
+  const px = player?.x ?? 0;
+  const py = player?.y ?? 0;
+  const havePlayer = Boolean(player);
+  for (const enemy of enemies.values()) {
+    const hp = enemy.hp;
+    if (hp > 0) totalHp += hp;
+    if (havePlayer) {
+      const dx = enemy.x - px;
+      const dy = enemy.y - py;
+      const d = dx * dx + dy * dy;
+      if (d < nearestDistSq) nearestDistSq = d;
+    }
+  }
+  return { totalHp, nearestDistSq };
 }
 
 function totalEnemyHp(enemies) {
@@ -572,6 +830,16 @@ function initialWeights() {
     weights[4] = -0.22 * moveY;
     weights[6] = 0.08 * moveX;
     weights[7] = 0.08 * moveY;
+    return weights;
+  });
+}
+
+function initialAimWeights() {
+  return AIM_TURN_DELTAS.map((delta) => {
+    const weights = Array(FEATURE_COUNT).fill(0);
+    weights[0] = delta === 0 ? 0.25 : -Math.abs(delta) * 0.05;
+    weights[17] = delta > 0 ? 0.6 : delta < 0 ? -0.6 : 0;
+    weights[16] = delta === 0 ? 0.4 : -0.05;
     return weights;
   });
 }
@@ -635,6 +903,7 @@ function normalizeModel(model) {
   return {
     iteration: clampNonNegativeInteger(model.iteration, 0),
     weights,
+    aimWeights: normalizeAimWeights(model.aimWeights),
     upgradeWeights: normalizeUpgradeWeights(model.upgradeWeights),
     history: normalizeHistory(model.history),
   };
@@ -650,6 +919,24 @@ function normalizeWeights(rawWeights) {
     const weights = row.map((value) => {
       const number = Number(value);
       if (!Number.isFinite(number)) throw new Error("PPO model weights contain invalid values.");
+      return number;
+    });
+    while (weights.length < featureCount) weights.push(0);
+    return weights;
+  });
+}
+
+function normalizeAimWeights(rawWeights) {
+  if (rawWeights == null) return initialAimWeights();
+  if (!Array.isArray(rawWeights) || rawWeights.length !== AIM_TURN_DELTAS.length) {
+    throw new Error("PPO model aim weights do not match the aim action space.");
+  }
+  const featureCount = Math.max(FEATURE_COUNT, ...rawWeights.map((row) => (Array.isArray(row) ? row.length : 0)));
+  return rawWeights.map((row) => {
+    if (!Array.isArray(row)) throw new Error("PPO model aim weights are malformed.");
+    const weights = row.map((value) => {
+      const number = Number(value);
+      if (!Number.isFinite(number)) throw new Error("PPO model aim weights contain invalid values.");
       return number;
     });
     while (weights.length < featureCount) weights.push(0);
@@ -686,6 +973,7 @@ function normalizeHistory(rawHistory) {
     score: finiteNumber(point?.score, 0),
     deathRate: finiteNumber(point?.deathRate, 0),
     episodes: clampNonNegativeInteger(point?.episodes, 0),
+    trainedEpisodes: clampNonNegativeInteger(point?.trainedEpisodes ?? point?.episodes, 0),
     ticks: clampNonNegativeInteger(point?.ticks, 0),
     ticksPerSecond: clampNonNegativeInteger(point?.ticksPerSecond, 0),
   }));
@@ -699,4 +987,23 @@ function clampNonNegativeInteger(value, fallback) {
 function finiteNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function softmaxRows(weights, features) {
+  const n = weights.length;
+  const out = new Array(n);
+  let maxLogit = -Infinity;
+  for (let i = 0; i < n; i += 1) {
+    const logit = dot(weights[i], features);
+    out[i] = logit;
+    if (logit > maxLogit) maxLogit = logit;
+  }
+  let total = 0;
+  for (let i = 0; i < n; i += 1) {
+    const e = Math.exp(out[i] - maxLogit);
+    out[i] = e;
+    total += e;
+  }
+  for (let i = 0; i < n; i += 1) out[i] /= total;
+  return out;
 }

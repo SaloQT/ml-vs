@@ -1,16 +1,96 @@
-import { GAME, NETWORK, PLAYER_BASE } from "./config.js";
+import { DIFFICULTY, GAME, NETWORK, PLAYER_BASE, RUN_EVENTS } from "./config.js";
 import { createEffect, createEnemy, createPickup, createPlayer, createProjectile } from "./entities.js";
 import { clamp, distanceSq, normalize, Rng } from "./math.js";
 import { applyMetaProgress, normalizeMetaProgress } from "./metaProgression.js";
 import { createTargetingConfig, mergeTargetingConfig, selectTarget } from "./targeting.js";
 import { pickUpgradeChoices, UPGRADE_POOL } from "./upgrades.js";
 
+const ELITE_ROTATION = [
+  {
+    id: "rift-charger",
+    type: "charger",
+    affixes: ["hasted", "volatile"],
+    hpMultiplier: 2.4,
+    speedMultiplier: 1.08,
+    damageBonus: 4,
+    xpBonus: 12,
+    radiusBonus: 5,
+  },
+  {
+    id: "warden-captain",
+    type: "warden",
+    affixes: ["armored", "regenerating"],
+    hpMultiplier: 2.8,
+    speedMultiplier: 0.92,
+    damageBonus: 5,
+    xpBonus: 14,
+    radiusBonus: 6,
+    armorBonus: 3,
+  },
+];
+
+const BOSS_ROTATION = [
+  {
+    id: "brood-splitter",
+    type: "splitter",
+    affixes: ["regenerating"],
+    hpMultiplier: 8.5,
+    speedMultiplier: 0.76,
+    damageBonus: 8,
+    xpBonus: 46,
+    radiusBonus: 22,
+    splitCount: 6,
+  },
+  {
+    id: "siphon-prime",
+    type: "siphon",
+    affixes: ["armored"],
+    hpMultiplier: 9,
+    speedMultiplier: 0.82,
+    damageBonus: 9,
+    xpBonus: 52,
+    radiusBonus: 23,
+    armorBonus: 2,
+  },
+  {
+    id: "bastion-bulwark",
+    type: "bulwark",
+    affixes: ["armored", "regenerating"],
+    hpMultiplier: 9.5,
+    speedMultiplier: 0.68,
+    damageBonus: 12,
+    xpBonus: 58,
+    radiusBonus: 24,
+    armorBonus: 4,
+  },
+  {
+    id: "nova-spitter",
+    type: "spitter",
+    affixes: ["volatile", "hasted"],
+    hpMultiplier: 7.8,
+    speedMultiplier: 0.88,
+    damageBonus: 10,
+    xpBonus: 50,
+    radiusBonus: 21,
+  },
+];
+
+const BOSS_SPAWN_TELEGRAPH_DURATION = 2.5;
+
 export class GameSimulation {
-  constructor({ seed = Date.now(), localPlayerId = "p1", targeting = {}, metaProgress = {} } = {}) {
+  constructor({ seed = Date.now(), localPlayerId = "p1", targeting = {}, metaProgress = {}, headless = false, enableRunEvents = undefined, enemyHealthMultiplier = 1, enemySpeedMultiplier = 1, enemySpawnMultiplier = 1, runMode = "normal" } = {}) {
+    this.enemyHealthMultiplier = Number.isFinite(enemyHealthMultiplier) && enemyHealthMultiplier > 0 ? enemyHealthMultiplier : 1;
+    this.enemySpeedMultiplier = Number.isFinite(enemySpeedMultiplier) && enemySpeedMultiplier > 0 ? enemySpeedMultiplier : 1;
+    this.enemySpawnMultiplier = Number.isFinite(enemySpawnMultiplier) && enemySpawnMultiplier > 0 ? enemySpawnMultiplier : 1;
+    this.runMode = runMode === "overrun" ? "overrun" : "normal";
+    this.outcome = null;
+    this.difficulty = difficultyAt(0);
     this.rng = new Rng(seed);
+    this.runEventRng = new Rng((seed >>> 0) ^ 0x9e3779b9);
     this.targeting = createTargetingConfig(targeting);
     this._targetingCache = buildTargetingCache(this.targeting.primaryWeapon);
     this.metaProgress = normalizeMetaProgress(metaProgress);
+    this.headless = headless;
     this.localPlayerId = localPlayerId;
     this.tick = 0;
     this.elapsed = 0;
@@ -23,8 +103,22 @@ export class GameSimulation {
     this.pickups = new Map();
     this.effects = new Map();
     this.inputs = new Map();
+    const runEventsEnabled = enableRunEvents ?? !headless;
+    this.runEvents = {
+      enabled: Boolean(runEventsEnabled),
+      nextAt: null,
+      active: [],
+      alert: null,
+      sequence: 0,
+    };
+    if (this.runEvents.enabled) this.scheduleNextRunEvent(RUN_EVENTS.firstEventDelay);
     this.wave = 1;
     this.spawnTimer = 0;
+    this.nextEliteSpawnAt = 75;
+    this.nextBossSpawnAt = 135;
+    this.bossSpawnTelegraph = null;
+    this.elitesSpawned = 0;
+    this.bossesSpawned = 0;
     this.addPlayer(localPlayerId);
   }
 
@@ -33,7 +127,7 @@ export class GameSimulation {
     const player = createPlayer(id, Math.cos(spawnAngle) * 80, Math.sin(spawnAngle) * 80);
     applyMetaProgress(player, this.metaProgress);
     this.players.set(id, player);
-    this.inputs.set(id, { moveX: 0, moveY: 0 });
+    this.inputs.set(id, { moveX: 0, moveY: 0, aimX: player.facingX, aimY: player.facingY });
     return player;
   }
 
@@ -47,6 +141,8 @@ export class GameSimulation {
     this.inputs.set(playerId, {
       moveX: clamp(input.moveX ?? current.moveX ?? 0, -1, 1),
       moveY: clamp(input.moveY ?? current.moveY ?? 0, -1, 1),
+      aimX: clamp(input.aimX ?? current.aimX ?? 1, -1, 1),
+      aimY: clamp(input.aimY ?? current.aimY ?? 0, -1, 1),
     });
   }
 
@@ -60,6 +156,7 @@ export class GameSimulation {
     this.tick += 1;
     this.elapsed += dt;
     this.wave = 1 + Math.floor(this.elapsed / 45);
+    this.updateRunEvents(dt);
     this.updatePlayers(dt);
     this.updateSpawning(dt);
     this.updateEnemies(dt);
@@ -69,6 +166,7 @@ export class GameSimulation {
     this.updateEffects(dt);
     this.cleanupFarEntities();
     this.checkGameOver();
+    this.checkRunOutcome();
   }
 
   chooseUpgrade(upgradeId) {
@@ -83,11 +181,15 @@ export class GameSimulation {
   }
 
   getSnapshot() {
+    const difficulty = this.currentDifficulty();
     return {
       protocolVersion: NETWORK.protocolVersion,
       tick: this.tick,
       elapsed: this.elapsed,
       state: this.state,
+      runMode: this.runMode,
+      outcome: this.outcome,
+      difficulty,
       wave: this.wave,
       localPlayerId: this.localPlayerId,
       players: [...this.players.values()].map((player) => ({
@@ -99,9 +201,143 @@ export class GameSimulation {
       projectiles: [...this.projectiles.values()],
       pickups: [...this.pickups.values()],
       effects: [...this.effects.values()],
+      runEvents: {
+        enabled: this.runEvents.enabled,
+        nextAt: this.runEvents.nextAt,
+        active: this.runEvents.active.map((event) => ({ ...event })),
+        alert: this.runEvents.alert ? { ...this.runEvents.alert } : null,
+      },
+      bossSpawnTelegraph: this.bossSpawnTelegraph ? { ...this.bossSpawnTelegraph } : null,
       pendingUpgradeChoices: this.pendingUpgradeChoices,
       targeting: this.targeting,
     };
+  }
+
+  scheduleNextRunEvent(delayRange = RUN_EVENTS.interval) {
+    if (!this.runEvents.enabled) return;
+    this.runEvents.nextAt = this.elapsed + this.runEventRng.range(delayRange[0], delayRange[1]);
+  }
+
+  updateRunEvents(dt) {
+    if (!this.runEvents.enabled) return;
+    this.runEvents.alert = null;
+    if (this.runEvents.nextAt !== null) {
+      const timeUntilNext = this.runEvents.nextAt - this.elapsed;
+      if (timeUntilNext <= RUN_EVENTS.alertLeadTime && timeUntilNext > 0) {
+        this.runEvents.alert = {
+          type: "incoming",
+          label: "RUN EVENT",
+          timeRemaining: timeUntilNext,
+        };
+      }
+      if (this.elapsed >= this.runEvents.nextAt) {
+        this.startRunEvent();
+        this.scheduleNextRunEvent();
+      }
+    }
+
+    for (const event of this.runEvents.active) {
+      if (event.type === RUN_EVENTS.laneSweep.id) this.updateLaneSweep(event);
+      if (event.type === RUN_EVENTS.rewardCache.id) this.updateRewardCache(event);
+    }
+    this.runEvents.active = this.runEvents.active.filter((event) => this.elapsed < event.endAt);
+  }
+
+  startRunEvent() {
+    const type = this.pickRunEventType();
+    const event = type === RUN_EVENTS.rewardCache.id ? this.createRewardCacheEvent() : this.createLaneSweepEvent();
+    this.runEvents.active.push(event);
+    this.runEvents.alert = {
+      type: event.type,
+      label: event.label,
+      timeRemaining: event.triggerAt - this.elapsed,
+    };
+  }
+
+  pickRunEventType() {
+    const options = [RUN_EVENTS.laneSweep, RUN_EVENTS.rewardCache];
+    const totalWeight = options.reduce((sum, event) => sum + event.weight, 0);
+    let roll = this.runEventRng.next() * totalWeight;
+    for (const event of options) {
+      roll -= event.weight;
+      if (roll <= 0) return event.id;
+    }
+    return RUN_EVENTS.laneSweep.id;
+  }
+
+  createLaneSweepEvent() {
+    const player = this.players.get(this.localPlayerId) ?? [...this.players.values()][0];
+    const baseAngle = player ? Math.atan2(player.facingY ?? 0, player.facingX ?? 1) : 0;
+    const angle = baseAngle + this.runEventRng.range(-0.85, 0.85) + Math.PI / 2;
+    const normalX = Math.cos(angle);
+    const normalY = Math.sin(angle);
+    const offset = this.runEventRng.range(-220, 220);
+    const centerX = (player?.x ?? 0) + normalX * offset;
+    const centerY = (player?.y ?? 0) + normalY * offset;
+    const triggerAt = this.elapsed + RUN_EVENTS.laneSweep.telegraphDuration;
+    return {
+      id: `run-event-${this.runEvents.sequence += 1}`,
+      type: RUN_EVENTS.laneSweep.id,
+      label: RUN_EVENTS.laneSweep.label,
+      x: centerX,
+      y: centerY,
+      dirX: -normalY,
+      dirY: normalX,
+      normalX,
+      normalY,
+      width: RUN_EVENTS.laneSweep.width,
+      length: RUN_EVENTS.laneSweep.length,
+      damage: RUN_EVENTS.laneSweep.damage,
+      startedAt: this.elapsed,
+      triggerAt,
+      endAt: triggerAt + RUN_EVENTS.laneSweep.activeDuration,
+      damagedPlayerIds: [],
+    };
+  }
+
+  createRewardCacheEvent() {
+    const player = this.players.get(this.localPlayerId) ?? [...this.players.values()][0];
+    const angle = this.runEventRng.range(0, Math.PI * 2);
+    const distance = this.runEventRng.range(RUN_EVENTS.rewardCache.distance[0], RUN_EVENTS.rewardCache.distance[1]);
+    const x = (player?.x ?? 0) + Math.cos(angle) * distance;
+    const y = (player?.y ?? 0) + Math.sin(angle) * distance;
+    const triggerAt = this.elapsed + RUN_EVENTS.rewardCache.telegraphDuration;
+    return {
+      id: `run-event-${this.runEvents.sequence += 1}`,
+      type: RUN_EVENTS.rewardCache.id,
+      label: RUN_EVENTS.rewardCache.label,
+      x,
+      y,
+      radius: 76,
+      startedAt: this.elapsed,
+      triggerAt,
+      endAt: triggerAt + RUN_EVENTS.rewardCache.activeDuration,
+      pickupId: null,
+      collectedAt: null,
+    };
+  }
+
+  updateLaneSweep(event) {
+    if (this.elapsed < event.triggerAt) return;
+    for (const player of this.players.values()) {
+      if (player.hp <= 0 || event.damagedPlayerIds.includes(player.id)) continue;
+      const dx = player.x - event.x;
+      const dy = player.y - event.y;
+      const along = dx * event.dirX + dy * event.dirY;
+      const across = dx * event.normalX + dy * event.normalY;
+      if (Math.abs(along) > event.length / 2 || Math.abs(across) > event.width / 2 + player.radius) continue;
+      const incomingDamage = Math.max(1, event.damage - this.playerArmor(player));
+      this.damagePlayer(player, incomingDamage, PLAYER_BASE.invulnerability * 0.75 + player.stats.invulnerabilityBonus);
+      event.damagedPlayerIds.push(player.id);
+    }
+  }
+
+  updateRewardCache(event) {
+    if (event.pickupId || this.elapsed < event.triggerAt) return;
+    const pickup = createPickup(this.entityId(), event.x, event.y, RUN_EVENTS.rewardCache.value, "cache");
+    pickup.runEventId = event.id;
+    event.pickupId = pickup.id;
+    this.pickups.set(pickup.id, pickup);
   }
 
   updatePlayers(dt) {
@@ -115,6 +351,7 @@ export class GameSimulation {
       const moveNy = moveLen ? my / moveLen : 0;
       player.overdriveFor = Math.max(0, (player.overdriveFor ?? 0) - dt);
       player.magnetBurstFor = Math.max(0, (player.magnetBurstFor ?? 0) - dt);
+      player.pickupSpeedBurstFor = Math.max(0, (player.pickupSpeedBurstFor ?? 0) - dt);
       const speed = this.playerSpeed(player);
       player.vx = moveNx * speed;
       player.vy = moveNy * speed;
@@ -123,9 +360,32 @@ export class GameSimulation {
       player.x = newX < -worldRadius ? -worldRadius : newX > worldRadius ? worldRadius : newX;
       player.y = newY < -worldRadius ? -worldRadius : newY > worldRadius ? worldRadius : newY;
       player.invulnerableFor = Math.max(0, player.invulnerableFor - dt);
+      player.shieldRechargeCooldown = Math.max(0, (player.shieldRechargeCooldown ?? 0) - dt);
       player.cooldown -= dt;
       if (player.stats.regen > 0 && player.hp < player.stats.maxHp * 0.7) {
         player.hp = Math.min(player.stats.maxHp, player.hp + player.stats.regen * dt);
+      }
+      if ((player.crisisRepairRemaining ?? 0) > 0) {
+        const duration = Math.max(0.1, player.stats.crisisRepairDuration);
+        const healing = (player.stats.crisisRepair / duration) * Math.min(dt, player.crisisRepairRemaining);
+        player.hp = Math.min(player.stats.maxHp, player.hp + healing);
+        player.crisisRepairRemaining = Math.max(0, player.crisisRepairRemaining - dt);
+      }
+      if (
+        player.stats.crisisRepair > 0 &&
+        !player.crisisRepairUsed &&
+        player.hp > 0 &&
+        player.hp <= player.stats.maxHp * player.stats.crisisRepairThreshold
+      ) {
+        player.crisisRepairUsed = true;
+        player.crisisRepairRemaining = player.stats.crisisRepairDuration;
+        this.spawnCollectionEffect(player, "repair");
+      }
+      if (player.stats.shieldRechargeRate > 0 && player.shieldRechargeCooldown <= 0) {
+        const rechargeCap = Math.min(this.playerShieldCap(player), player.stats.shieldRechargeCap);
+        if ((player.shield ?? 0) < rechargeCap) {
+          player.shield = Math.min(rechargeCap, (player.shield ?? 0) + player.stats.shieldRechargeRate * dt);
+        }
       }
       if (
         player.stats.emergencyShield > 0 &&
@@ -138,24 +398,11 @@ export class GameSimulation {
         this.spawnCollectionEffect(player, "shield");
       }
 
-      const target = this._selectPrimaryTargetFast(player);
-      let aimDx;
-      let aimDy;
-      if (target) {
-        const dx = target.x - player.x;
-        const dy = target.y - player.y;
-        const len = Math.hypot(dx, dy);
-        if (len) {
-          aimDx = dx / len;
-          aimDy = dy / len;
-        } else {
-          aimDx = 0;
-          aimDy = 0;
-        }
-      } else {
-        aimDx = 1;
-        aimDy = 0;
-      }
+      const aim = normalize(input.aimX ?? player.aimX ?? player.facingX ?? 1, input.aimY ?? player.aimY ?? player.facingY ?? 0);
+      const aimDx = aim.x || player.facingX || 1;
+      const aimDy = aim.y || player.facingY || 0;
+      player.aimX = aimDx;
+      player.aimY = aimDy;
       const turnBlend = 1 - Math.exp(-10 * dt);
       const facingX = player.facingX + (aimDx - player.facingX) * turnBlend;
       const facingY = player.facingY + (aimDy - player.facingY) * turnBlend;
@@ -168,12 +415,9 @@ export class GameSimulation {
         player.facingY = 0;
       }
 
-      if (player.cooldown <= 0 && target) {
-        const dot = player.facingX * aimDx + player.facingY * aimDy;
-        if (dot >= this._targetingCache.angleThreshold) {
-          this.fireVolley(player, { x: aimDx, y: aimDy });
-          player.cooldown = 0.42 / this.playerFireRate(player);
-        }
+      if (player.cooldown <= 0) {
+        this.fireVolley(player, { x: aimDx, y: aimDy });
+        player.cooldown = 0.42 / this.playerFireRate(player);
       }
     }
   }
@@ -188,6 +432,7 @@ export class GameSimulation {
       const sin = Math.sin(offset);
       const dx = direction.x * cos - direction.y * sin;
       const dy = direction.x * sin + direction.y * cos;
+      const damageRoll = this.rollWeaponDamage(player);
       const projectile = createProjectile(
         this.entityId(),
         player.id,
@@ -195,21 +440,33 @@ export class GameSimulation {
         player.y + dy * 24,
         dx * player.stats.projectileSpeed,
         dy * player.stats.projectileSpeed,
-        this.rollDamage(player),
+        damageRoll.damage,
         player.stats.projectileRadius,
         player.stats.projectileTtl,
         {
+          acceleration: player.stats.projectileAcceleration,
+          maxSpeedMultiplier: player.stats.projectileMaxSpeedMultiplier,
+          isCritical: damageRoll.isCritical,
+          executeThreshold: player.stats.critExecuteThreshold,
+          burnDps: player.stats.burnDps,
+          burnDuration: player.stats.burnDuration,
+          markDamageTakenMultiplier: player.stats.markDamageTakenMultiplier,
+          markDuration: player.stats.markDuration,
           pierce: player.stats.projectilePierce,
           color: player.stats.projectileColor,
           glowColor: player.stats.projectileGlowColor,
           chainArcs: player.stats.chainArcs,
           chainRange: player.stats.chainRange,
           chainDamageMultiplier: player.stats.chainDamageMultiplier,
+          chainForks: player.stats.chainForks,
           ricochetBounces: player.stats.ricochetBounces,
           ricochetRange: player.stats.ricochetRange,
           ricochetDamageMultiplier: player.stats.ricochetDamageMultiplier,
           splashRadius: player.stats.splashRadius * player.stats.area,
           splashDamageMultiplier: player.stats.splashDamageMultiplier,
+          splashCenterBonusPerTarget: player.stats.splashCenterBonusPerTarget,
+          droneArcDamagePerDrone: player.stats.droneArcDamagePerDrone,
+          droneArcRange: player.stats.droneArcRange,
         },
       );
       this.projectiles.set(projectile.id, projectile);
@@ -227,10 +484,17 @@ export class GameSimulation {
   }
 
   rollDamage(player) {
+    return this.rollWeaponDamage(player).damage;
+  }
+
+  rollWeaponDamage(player) {
     const crit = this.rng.next() < player.stats.critChance;
     const speedRatio = Math.min(1, Math.hypot(player.vx ?? 0, player.vy ?? 0) / Math.max(1, this.playerSpeed(player)));
     const velocityBonus = 1 + speedRatio * (player.stats.velocityDamageBonus ?? 0);
-    return player.stats.damage * velocityBonus * (crit ? player.stats.critDamage : 1);
+    return {
+      damage: player.stats.damage * velocityBonus * (crit ? player.stats.critDamage : 1),
+      isCritical: crit,
+    };
   }
 
   primaryTargetFor(player) {
@@ -242,13 +506,8 @@ export class GameSimulation {
   }
 
   primaryWeaponAim(player) {
-    const target = this.primaryTargetFor(player);
-    if (!target) return null;
-    const targetDirection = normalize(target.x - player.x, target.y - player.y);
-    const facing = normalize(player.facingX, player.facingY);
-    const dot = facing.x * targetDirection.x + facing.y * targetDirection.y;
-    const threshold = Math.cos((this.targeting.primaryWeapon.firingAngleDegrees * Math.PI) / 180);
-    return dot >= threshold ? { target, direction: targetDirection } : null;
+    const targetDirection = normalize(player.aimX ?? player.facingX ?? 1, player.aimY ?? player.facingY ?? 0);
+    return { target: null, direction: targetDirection };
   }
 
   updatePlayerFacing(player, dt) {
@@ -265,10 +524,15 @@ export class GameSimulation {
 
   updateSpawning(dt) {
     this.spawnTimer -= dt;
-    if (this.spawnTimer > 0 || this.enemies.size >= GAME.maxEnemies) return;
+    const spawnMultiplier = this.effectiveSpawnMultiplier();
+    const enemyCap = Math.max(1, Math.round(GAME.maxEnemies * spawnMultiplier));
     const alivePlayers = [...this.players.values()].filter((player) => player.hp > 0);
     if (!alivePlayers.length) return;
-    const packSize = Math.min(3 + this.wave, 15);
+    this.updateBossSpawnTelegraph(alivePlayers);
+    this.spawnScheduledEnemies(alivePlayers, enemyCap);
+    if (this.spawnTimer > 0 || this.enemies.size >= enemyCap) return;
+    const basePack = Math.min(3 + this.wave, 15);
+    const packSize = Math.max(1, Math.round(basePack * spawnMultiplier));
     for (let i = 0; i < packSize; i += 1) {
       const target = this.rng.pick(alivePlayers);
       const angle = this.rng.range(0, Math.PI * 2);
@@ -317,9 +581,94 @@ export class GameSimulation {
         this.wave,
         { affixes },
       );
+      this.applyEnemyScaling(enemy);
       this.enemies.set(enemy.id, enemy);
     }
-    this.spawnTimer = Math.max(0.36, 1.7 - this.wave * 0.08);
+    this.spawnTimer = Math.max(0.28, (1.7 - this.wave * 0.08) / Math.sqrt(spawnMultiplier));
+  }
+
+  spawnScheduledEnemies(alivePlayers, enemyCap) {
+    if (this.enemies.size < enemyCap && this.elapsed >= this.nextEliteSpawnAt) {
+      this.spawnElite(alivePlayers);
+      this.elitesSpawned += 1;
+      const interval = Math.max(34, 62 - this.wave * 1.2);
+      this.nextEliteSpawnAt = Math.max(this.nextEliteSpawnAt + interval, this.elapsed + interval);
+    }
+    if (this.enemies.size < enemyCap && this.elapsed >= this.nextBossSpawnAt) {
+      this.spawnBoss(alivePlayers);
+      this.bossesSpawned += 1;
+      this.nextBossSpawnAt = Math.max(this.nextBossSpawnAt + 135, this.elapsed + 135);
+      this.bossSpawnTelegraph = null;
+    }
+  }
+
+  updateBossSpawnTelegraph(alivePlayers) {
+    if (this.bossSpawnTelegraph || this.elapsed < this.nextBossSpawnAt - BOSS_SPAWN_TELEGRAPH_DURATION) return;
+    const definition = BOSS_ROTATION[this.bossesSpawned % BOSS_ROTATION.length];
+    const target = this.rng.pick(alivePlayers);
+    if (!target) return;
+    const angle = this.rng.range(0, Math.PI * 2);
+    const distance = this.rng.range(760, 940);
+    this.bossSpawnTelegraph = {
+      bossId: definition.id,
+      x: target.x + Math.cos(angle) * distance,
+      y: target.y + Math.sin(angle) * distance,
+      color: bossDefinitionColor(definition.id),
+      startedAt: this.elapsed,
+      triggerAt: this.nextBossSpawnAt,
+      duration: Math.max(0.001, this.nextBossSpawnAt - this.elapsed),
+    };
+  }
+
+  spawnElite(alivePlayers = [...this.players.values()].filter((player) => player.hp > 0)) {
+    const definition = ELITE_ROTATION[this.elitesSpawned % ELITE_ROTATION.length];
+    const target = this.rng.pick(alivePlayers);
+    if (!target) return null;
+    const enemy = this.createRankedEnemy(definition, "elite", target, this.rng.range(620, 780));
+    this.enemies.set(enemy.id, enemy);
+    return enemy;
+  }
+
+  spawnBoss(alivePlayers = [...this.players.values()].filter((player) => player.hp > 0)) {
+    const definition = BOSS_ROTATION[this.bossesSpawned % BOSS_ROTATION.length];
+    let enemy = null;
+    if (this.bossSpawnTelegraph?.bossId === definition.id) {
+      enemy = this.createRankedEnemyAt(definition, "boss", this.bossSpawnTelegraph.x, this.bossSpawnTelegraph.y);
+    } else {
+      const target = this.rng.pick(alivePlayers);
+      if (!target) return null;
+      enemy = this.createRankedEnemy(definition, "boss", target, this.rng.range(760, 940));
+    }
+    this.enemies.set(enemy.id, enemy);
+    if (!this.headless) {
+      const effectId = this.entityId();
+      this.effects.set(effectId, createEffect(effectId, "bossSpawnBurst", enemy.x, enemy.y, enemy.radius + 90, 0.45));
+    }
+    return enemy;
+  }
+
+  createRankedEnemy(definition, rank, target, distance) {
+    const angle = this.rng.range(0, Math.PI * 2);
+    return this.createRankedEnemyAt(definition, rank, target.x + Math.cos(angle) * distance, target.y + Math.sin(angle) * distance);
+  }
+
+  createRankedEnemyAt(definition, rank, x, y) {
+    const enemy = createEnemy(
+      this.entityId(),
+      definition.type,
+      x,
+      y,
+      this.wave,
+      {
+        ...definition,
+        rank,
+        eliteId: rank === "elite" ? definition.id : null,
+        bossId: rank === "boss" ? definition.id : null,
+        phase: 1,
+      },
+    );
+    this.applyEnemyScaling(enemy);
+    return enemy;
   }
 
   rollEliteAffix() {
@@ -351,6 +700,13 @@ export class GameSimulation {
     const singleTarget = alivePlayers.length === 1 ? alivePlayers[0] : null;
     const decay = Math.pow(0.86, dt * 60);
     for (const enemy of this.enemies.values()) {
+      this.updateEnemyStatusDamage(enemy, dt);
+      if (!this.enemies.has(enemy.id)) continue;
+      enemy.siphonFor = Math.max(0, (enemy.siphonFor ?? 0) - dt);
+      enemy.armoredFlashFor = Math.max(0, (enemy.armoredFlashFor ?? 0) - dt);
+      if (enemy.bossTelegraph && this.elapsed - enemy.bossTelegraph.startedAt > enemy.bossTelegraph.duration) {
+        enemy.bossTelegraph = null;
+      }
       let target = singleTarget;
       if (!target) {
         let best = Infinity;
@@ -369,6 +725,7 @@ export class GameSimulation {
       if ((enemy.regenPerSecond ?? 0) > 0 && enemy.hp > 0) {
         enemy.hp = Math.min(enemy.maxHp, enemy.hp + enemy.regenPerSecond * dt);
       }
+      this.updateEnemyPhase(enemy, target, dt);
       const tdx = target.x - enemy.x;
       const tdy = target.y - enemy.y;
       const tlen = Math.hypot(tdx, tdy);
@@ -410,16 +767,19 @@ export class GameSimulation {
         }
       }
       if (enemy.type === "siphon" && tlen < 150 && enemy.hp > 0 && target.hp > 0) {
-        const drain = 7 * dt;
+        const drain = (enemy.rank === "boss" ? 11 : 7) * dt;
         const shield = target.shield ?? 0;
         const absorbed = Math.min(shield, drain);
         target.shield = shield - absorbed;
         const hpDrain = drain - absorbed;
         if (hpDrain > 0) target.hp = Math.max(0, target.hp - hpDrain);
         enemy.hp = Math.min(enemy.maxHp, enemy.hp + drain * 1.35);
+        enemy.siphonFor = 0.12;
+        enemy.siphonTargetX = target.x;
+        enemy.siphonTargetY = target.y;
         speedMultiplier = 0.55;
       }
-      if (enemy.type === "warden" && tlen < 260) speedMultiplier = 0.74;
+      if (enemy.type === "warden" && tlen < (enemy.rank === "elite" ? 310 : 260)) speedMultiplier = 0.74;
       const moveScale = enemy.speed * speedMultiplier * dt;
       enemy.x += dirX * moveScale + enemy.hitVx * dt;
       enemy.y += dirY * moveScale + enemy.hitVy * dt;
@@ -432,14 +792,9 @@ export class GameSimulation {
       const ddy = enemy.y - target.y;
       if (ddx * ddx + ddy * ddy <= hitDistance * hitDistance) {
         if (target.invulnerableFor <= 0) {
-          const incomingDamage = Math.max(1, enemy.damage - target.stats.armor);
-          const shield = target.shield ?? 0;
-          const absorbed = shield < incomingDamage ? shield : incomingDamage;
-          target.shield = shield - absorbed;
-          const remaining = target.hp - (incomingDamage - absorbed);
-          target.hp = remaining > 0 ? remaining : 0;
-          target.invulnerableFor = PLAYER_BASE.invulnerability;
-          if (absorbed > 0 && target.stats.ramDamage > 0) {
+          const incomingDamage = Math.max(1, enemy.damage - this.playerArmor(target));
+          const result = this.damagePlayer(target, incomingDamage, PLAYER_BASE.invulnerability + target.stats.invulnerabilityBonus);
+          if (result.absorbed > 0 && target.stats.ramDamage > 0) {
             this.damageEnemy(enemy, target.stats.ramDamage, {
               ownerId: target.id,
               x: target.x,
@@ -448,11 +803,69 @@ export class GameSimulation {
               vy: enemy.y - target.y,
             });
           }
+          if (result.hullDamage > 0 && target.stats.hullDamageReflection > 0) {
+            this.damageEnemy(enemy, result.hullDamage * target.stats.hullDamageReflection, {
+              ownerId: target.id,
+              x: target.x,
+              y: target.y,
+              vx: enemy.x - target.x,
+              vy: enemy.y - target.y,
+            });
+          }
         }
-        enemy.x -= dirX * 20;
-        enemy.y -= dirY * 20;
+        const knockback = 20 + (target.stats.contactKnockback ?? 0);
+        enemy.x -= dirX * knockback;
+        enemy.y -= dirY * knockback;
+        enemy.hitVx -= dirX * (target.stats.contactKnockback ?? 0) * 3.4;
+        enemy.hitVy -= dirY * (target.stats.contactKnockback ?? 0) * 3.4;
       }
     }
+  }
+
+  updateEnemyPhase(enemy, target, dt) {
+    if (enemy.rank !== "boss") return;
+    enemy.phaseTimer = (enemy.phaseTimer ?? 0) + dt;
+    const healthRatio = enemy.maxHp > 0 ? enemy.hp / enemy.maxHp : 0;
+    const nextPhase = healthRatio <= 0.34 ? 3 : healthRatio <= 0.67 ? 2 : 1;
+    if (nextPhase !== enemy.phase) {
+      enemy.phase = nextPhase;
+      enemy.phaseTimer = 0;
+      enemy.phaseCooldown = 0;
+      enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.24);
+    }
+    enemy.phaseCooldown = Math.max(0, (enemy.phaseCooldown ?? 0) - dt);
+    if (enemy.phase < 2 || enemy.phaseCooldown > 0 || !target) return;
+    if (enemy.bossId === "brood-splitter") {
+      enemy.bossTelegraph = { type: "split", startedAt: this.elapsed, duration: 0.8 };
+      this.spawnBossMinion(enemy, "shard", target);
+      enemy.phaseCooldown = enemy.phase === 3 ? 2.8 : 4.2;
+    } else if (enemy.bossId === "nova-spitter") {
+      enemy.bossTelegraph = { type: "burst", startedAt: this.elapsed, duration: 1 };
+      this.spawnBossMinion(enemy, "spitter", target);
+      enemy.phaseCooldown = enemy.phase === 3 ? 4.5 : 6.5;
+    } else if (enemy.bossId === "bastion-bulwark") {
+      enemy.armor = Math.max(enemy.armor ?? 0, enemy.phase === 3 ? 14 : 10);
+      enemy.armoredFlashFor = 0.25;
+      enemy.bossTelegraph = { type: "slam", startedAt: this.elapsed, duration: 1 };
+      enemy.phaseCooldown = 5;
+    }
+  }
+
+  spawnBossMinion(enemy, type, target) {
+    if (this.enemies.size >= GAME.maxEnemies) return;
+    const direction = normalize(target.x - enemy.x, target.y - enemy.y);
+    const minion = createEnemy(
+      this.entityId(),
+      type,
+      enemy.x + direction.x * (enemy.radius + 32),
+      enemy.y + direction.y * (enemy.radius + 32),
+      this.wave,
+      { splitDepth: (enemy.splitDepth ?? 0) + 1 },
+    );
+    minion.hitVx = direction.x * 70;
+    minion.hitVy = direction.y * 70;
+    this.applyEnemyScaling(minion);
+    this.enemies.set(minion.id, minion);
   }
 
   enemyMoveDirection(enemy, target, dt) {
@@ -467,6 +880,7 @@ export class GameSimulation {
 
   updateProjectiles(dt) {
     for (const projectile of this.projectiles.values()) {
+      this.accelerateProjectile(projectile, dt);
       projectile.x += projectile.vx * dt;
       projectile.y += projectile.vy * dt;
       projectile.ttl -= dt;
@@ -481,8 +895,10 @@ export class GameSimulation {
         if (distanceSq(projectile.x, projectile.y, enemy.x, enemy.y) <= hitDistance * hitDistance) {
           projectile.hitEnemyIds?.push(enemy.id);
           this.damageEnemy(enemy, projectile.damage, projectile);
+          this.applyProjectileStatuses(projectile, enemy);
           this.splashProjectileDamage(projectile, enemy);
           this.chainProjectileDamage(projectile, enemy);
+          this.droneRelayDamage(projectile, enemy);
           if (this.ricochetProjectile(projectile, enemy)) break;
           if (projectile.pierce > 0) {
             projectile.pierce -= 1;
@@ -549,11 +965,21 @@ export class GameSimulation {
       const { pickup, player } = toCollect[i];
       if (!pickupList.has(pickup.id)) continue;
       pickupList.delete(pickup.id);
+      this.markRewardCacheCollected(pickup);
       this.collectPickup(player, pickup);
     }
   }
 
+  markRewardCacheCollected(pickup) {
+    if (!pickup.runEventId) return;
+    const event = this.runEvents.active.find((item) => item.id === pickup.runEventId);
+    if (!event || event.type !== RUN_EVENTS.rewardCache.id || event.collectedAt !== null) return;
+    event.collectedAt = this.elapsed;
+    event.endAt = Math.min(event.endAt, this.elapsed + 0.4);
+  }
+
   updateEffects(dt) {
+    if (this.headless || this.effects.size === 0) return;
     for (const effect of this.effects.values()) {
       effect.ttl -= dt;
       if (effect.ttl <= 0) this.effects.delete(effect.id);
@@ -564,11 +990,18 @@ export class GameSimulation {
     const sourceDirection = source ? normalize(source.vx ?? enemy.x - source.x, source.vy ?? enemy.y - source.y) : { x: 0, y: 0 };
     const hitX = source?.x ?? enemy.x;
     const hitY = source?.y ?? enemy.y;
-    enemy.hp -= Math.max(1, damage - (enemy.armor ?? 0) - this.enemyArmorAuraBonus(enemy));
+    const markedMultiplier = (enemy.markedFor ?? 0) > 0 ? 1 + (enemy.markedDamageTakenMultiplier ?? 0) : 1;
+    const minimumDamage = source?.allowSubUnitDamage ? 0 : 1;
+    const mitigation = source?.ignoreArmor ? 0 : (enemy.armor ?? 0) + this.enemyArmorAuraBonus(enemy);
+    const appliedDamage = Math.max(minimumDamage, damage * markedMultiplier - mitigation);
+    enemy.hp -= appliedDamage;
+    if (source?.isCritical && source.executeThreshold > 0 && enemy.hp > 0 && enemy.hp <= enemy.maxHp * source.executeThreshold) {
+      enemy.hp = 0;
+    }
     enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.12);
     enemy.hitVx = (enemy.hitVx ?? 0) + sourceDirection.x * 90;
     enemy.hitVy = (enemy.hitVy ?? 0) + sourceDirection.y * 90;
-    this.spawnHitEffect(hitX, hitY, sourceDirection, damage, enemy.hp <= 0);
+    this.spawnHitEffect(hitX, hitY, sourceDirection, appliedDamage, enemy.hp <= 0);
     if (enemy.hp > 0 || !this.enemies.has(enemy.id)) return;
     this.enemies.delete(enemy.id);
     let owner = null;
@@ -587,6 +1020,7 @@ export class GameSimulation {
       if (owner.stats.killCooldownRefund > 0) {
         owner.cooldown = Math.max(0, owner.cooldown - owner.stats.killCooldownRefund);
       }
+      this.triggerKillVolley(enemy, owner);
     }
     this.triggerEnemyDeathAffixes(enemy, owner);
     this.spawnSplitChildren(enemy);
@@ -604,22 +1038,50 @@ export class GameSimulation {
     return bonus;
   }
 
+  playerArmor(player) {
+    const shieldArmor = Math.floor((player.shield ?? 0) / 25) * (player.stats.shieldArmorConversion ?? 0);
+    return (player.stats.armor ?? 0) + shieldArmor;
+  }
+
+  playerShieldCap(player) {
+    return player.stats.maxShield ?? 60;
+  }
+
+  damagePlayer(player, incomingDamage, invulnerabilityFor = PLAYER_BASE.invulnerability) {
+    const shield = player.shield ?? 0;
+    const absorbed = Math.min(shield, incomingDamage);
+    const hullDamage = incomingDamage - absorbed;
+    player.shield = Math.max(0, shield - absorbed);
+    player.hp = Math.max(0, player.hp - hullDamage);
+    player.invulnerableFor = Math.max(player.invulnerableFor ?? 0, invulnerabilityFor);
+    if (incomingDamage > 0) {
+      player.shieldRechargeCooldown = Math.max(
+        player.shieldRechargeCooldown ?? 0,
+        player.stats.shieldRechargeDelay ?? 3,
+      );
+    }
+    return { absorbed, hullDamage };
+  }
+
   triggerEnemyDeathAffixes(enemy, owner = null) {
     if (!enemy.affixes?.includes("volatile") || !enemy.volatileRadius || !enemy.volatileDamage) return;
     const effectId = this.entityId();
-    this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, enemy.volatileRadius, 0.36));
+    if (!this.headless) this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, enemy.volatileRadius, 0.36));
     for (const player of this.players.values()) {
       if (player.hp <= 0 || distanceSq(enemy.x, enemy.y, player.x, player.y) > enemy.volatileRadius ** 2) continue;
-      const incomingDamage = Math.max(1, enemy.volatileDamage - player.stats.armor);
-      const absorbed = Math.min(player.shield ?? 0, incomingDamage);
-      player.shield = Math.max(0, (player.shield ?? 0) - absorbed);
-      player.hp = Math.max(0, player.hp - (incomingDamage - absorbed));
-      player.invulnerableFor = Math.max(player.invulnerableFor, PLAYER_BASE.invulnerability * 0.5);
+      const incomingDamage = Math.max(1, enemy.volatileDamage - this.playerArmor(player));
+      this.damagePlayer(player, incomingDamage, PLAYER_BASE.invulnerability * 0.5 + player.stats.invulnerabilityBonus);
     }
     if (owner) owner.scrap += 1;
   }
 
   createEnemyDrop(enemy, owner = null) {
+    if (enemy.rank === "boss" || enemy.bossId) {
+      return createPickup(this.entityId(), enemy.x, enemy.y, Math.max(36, enemy.xp), "cache");
+    }
+    if (enemy.rank === "elite" || enemy.eliteId) {
+      return createPickup(this.entityId(), enemy.x, enemy.y, Math.max(10, Math.round(enemy.xp * 1.35)), "scrap");
+    }
     const repairChance = 0.12 + (owner?.stats.repairDropBonus ?? 0);
     const roll = this.rng.next();
     if (enemy.type === "bruiser" && roll < repairChance) {
@@ -634,29 +1096,56 @@ export class GameSimulation {
   }
 
   collectPickup(player, pickup) {
+    if (player.stats.pickupSpeedBurstDuration > 0) {
+      player.pickupSpeedBurstFor = Math.max(player.pickupSpeedBurstFor ?? 0, player.stats.pickupSpeedBurstDuration);
+    }
     if (pickup.type === "repair") {
-      player.hp = Math.min(player.stats.maxHp, player.hp + pickup.value);
+      const missingHp = Math.max(0, player.stats.maxHp - player.hp);
+      const restored = Math.min(missingHp, pickup.value);
+      const overflow = Math.max(0, pickup.value - restored);
+      player.hp += restored;
+      if (overflow > 0 && player.stats.repairOverflowScrap > 0) {
+        player.scrap = (player.scrap ?? 0) + Math.floor(overflow * player.stats.repairOverflowScrap);
+      }
     } else if (pickup.type === "shield") {
-      player.shield = Math.min(60, (player.shield ?? 0) + pickup.value);
+      const shieldCap = this.playerShieldCap(player);
+      const currentShield = player.shield ?? 0;
+      const value = pickup.value * (player.stats.shieldPickupMultiplier ?? 1);
+      const gained = Math.min(Math.max(0, shieldCap - currentShield), value);
+      const overflow = Math.max(0, value - gained);
+      player.shield = currentShield + gained;
+      if (overflow > 0 && player.stats.shieldOverflowScrap > 0) {
+        player.scrap = (player.scrap ?? 0) + Math.floor(overflow * player.stats.shieldOverflowScrap);
+      }
     } else if (pickup.type === "scrap") {
-      player.scrap = (player.scrap ?? 0) + pickup.value;
+      player.scrap = (player.scrap ?? 0) + Math.round(pickup.value * player.stats.scrapValueMultiplier);
+      if (player.stats.scrapGrantsXp > 0) this.gainXp(player, player.stats.scrapGrantsXp);
     } else if (pickup.type === "overdrive") {
       player.overdriveFor = Math.max(player.overdriveFor ?? 0, pickup.value);
       this.spawnCollectionEffect(player, "overdrive");
     } else if (pickup.type === "magnet") {
-      player.magnetBurstFor = Math.max(player.magnetBurstFor ?? 0, pickup.value);
+      player.magnetBurstFor = Math.max(player.magnetBurstFor ?? 0, pickup.value + player.stats.magnetPickupDurationBonus);
       this.spawnCollectionEffect(player, "magnetBurst");
     } else if (pickup.type === "cache") {
-      player.scrap = (player.scrap ?? 0) + pickup.value;
-      this.gainXp(player, Math.max(1, Math.round(pickup.value / 3)));
+      const value = Math.round(pickup.value * (1 + player.stats.cacheValueBonus));
+      player.scrap = (player.scrap ?? 0) + value;
+      this.gainXp(player, Math.max(1, Math.round(value / 3)));
       this.spawnCollectionEffect(player, "cacheOpened");
     } else {
+      if (player.stats.xpPickupScrapEvery > 0) {
+        player.xpPickupsCollected = (player.xpPickupsCollected ?? 0) + 1;
+        if (player.xpPickupsCollected % player.stats.xpPickupScrapEvery === 0) {
+          player.scrap = (player.scrap ?? 0) + player.stats.xpPickupScrapValue;
+        }
+      }
       this.gainXp(player, pickup.value);
     }
   }
 
   playerSpeed(player) {
-    return player.stats.speed * ((player.overdriveFor ?? 0) > 0 ? 1.28 : 1);
+    const overdriveMultiplier = (player.overdriveFor ?? 0) > 0 ? 1.28 : 1;
+    const pickupBurstMultiplier = (player.pickupSpeedBurstFor ?? 0) > 0 ? player.stats.pickupSpeedBurstMultiplier : 1;
+    return player.stats.speed * overdriveMultiplier * pickupBurstMultiplier;
   }
 
   playerFireRate(player) {
@@ -664,16 +1153,60 @@ export class GameSimulation {
   }
 
   pickupMagnetRadius(player) {
-    return player.stats.pickupRadius + GAME.xpMagnetRadius + ((player.magnetBurstFor ?? 0) > 0 ? 420 : 0);
+    return (
+      player.stats.pickupRadius +
+      GAME.xpMagnetRadius +
+      ((player.magnetBurstFor ?? 0) > 0 ? 420 + player.stats.magnetBurstRadiusBonus : 0)
+    );
   }
 
   spawnCollectionEffect(player, type) {
     const effectId = this.entityId();
+    if (this.headless) return;
     this.effects.set(effectId, createEffect(effectId, type, player.x, player.y, type === "cacheOpened" ? 120 : 180, 0.42));
   }
 
+  accelerateProjectile(projectile, dt) {
+    if (!projectile.acceleration || projectile.maxSpeedMultiplier <= 1 || dt <= 0) return;
+    const speed = Math.hypot(projectile.vx, projectile.vy);
+    if (!speed) return;
+    const maxSpeed = (projectile.initialSpeed || speed) * projectile.maxSpeedMultiplier;
+    if (speed >= maxSpeed) return;
+    const nextSpeed = Math.min(maxSpeed, speed * (1 + projectile.acceleration * dt));
+    const scale = nextSpeed / speed;
+    projectile.vx *= scale;
+    projectile.vy *= scale;
+  }
+
+  applyProjectileStatuses(projectile, enemy) {
+    if (projectile.burnDps > 0 && projectile.burnDuration > 0 && this.enemies.has(enemy.id)) {
+      enemy.burnDps = Math.max(enemy.burnDps ?? 0, projectile.burnDps);
+      enemy.burnFor = Math.max(enemy.burnFor ?? 0, projectile.burnDuration);
+      enemy.burnOwnerId = projectile.ownerId;
+    }
+    if (projectile.markDamageTakenMultiplier > 0 && projectile.markDuration > 0 && this.enemies.has(enemy.id)) {
+      enemy.markedDamageTakenMultiplier = Math.max(enemy.markedDamageTakenMultiplier ?? 0, projectile.markDamageTakenMultiplier);
+      enemy.markedFor = Math.max(enemy.markedFor ?? 0, projectile.markDuration);
+    }
+  }
+
+  updateEnemyStatusDamage(enemy, dt) {
+    if (enemy.markedFor > 0) enemy.markedFor = Math.max(0, enemy.markedFor - dt);
+    if (!(enemy.burnFor > 0) || !(enemy.burnDps > 0)) return;
+    enemy.burnFor = Math.max(0, enemy.burnFor - dt);
+    this.damageEnemy(enemy, enemy.burnDps * dt, {
+      ownerId: enemy.burnOwnerId,
+      x: enemy.x,
+      y: enemy.y,
+      vx: 0,
+      vy: 0,
+      allowSubUnitDamage: true,
+      ignoreArmor: true,
+    });
+  }
+
   chainProjectileDamage(projectile, firstEnemy) {
-    if (!projectile.chainArcs || !projectile.chainRange || projectile.chainDamageMultiplier <= 0) return;
+    if ((!projectile.chainArcs && !projectile.chainForks) || !projectile.chainRange || projectile.chainDamageMultiplier <= 0) return;
     const chainedEnemyIds = new Set([firstEnemy.id]);
     let sourceEnemy = firstEnemy;
     for (let arc = 0; arc < projectile.chainArcs; arc += 1) {
@@ -689,20 +1222,67 @@ export class GameSimulation {
       });
       sourceEnemy = target;
     }
+    this.forkProjectileChain(projectile, firstEnemy, chainedEnemyIds);
+  }
+
+  forkProjectileChain(projectile, firstEnemy, excludedIds = new Set([firstEnemy.id])) {
+    if (!projectile.chainForks || !projectile.chainRange || projectile.chainDamageMultiplier <= 0) return;
+    const targets = this.nearestChainTargets(firstEnemy, excludedIds, projectile.chainRange, projectile.chainForks);
+    for (const target of targets) {
+      excludedIds.add(target.id);
+      this.damageEnemy(target, projectile.damage * projectile.chainDamageMultiplier, {
+        ownerId: projectile.ownerId,
+        x: firstEnemy.x,
+        y: firstEnemy.y,
+        vx: target.x - firstEnemy.x,
+        vy: target.y - firstEnemy.y,
+      });
+    }
   }
 
   splashProjectileDamage(projectile, firstEnemy) {
     if (!projectile.splashRadius || projectile.splashDamageMultiplier <= 0) return;
     const radiusSq = projectile.splashRadius * projectile.splashRadius;
+    let caught = 0;
     for (const enemy of this.enemies.values()) {
       if (enemy.id === firstEnemy.id) continue;
       if (distanceSq(firstEnemy.x, firstEnemy.y, enemy.x, enemy.y) > radiusSq) continue;
+      caught += 1;
       this.damageEnemy(enemy, projectile.damage * projectile.splashDamageMultiplier, {
         ownerId: projectile.ownerId,
         x: firstEnemy.x,
         y: firstEnemy.y,
         vx: enemy.x - firstEnemy.x,
         vy: enemy.y - firstEnemy.y,
+      });
+    }
+    if (caught > 0 && projectile.splashCenterBonusPerTarget > 0 && this.enemies.has(firstEnemy.id)) {
+      this.damageEnemy(firstEnemy, projectile.damage * projectile.splashCenterBonusPerTarget * caught, {
+        ownerId: projectile.ownerId,
+        x: firstEnemy.x,
+        y: firstEnemy.y,
+        vx: 0,
+        vy: 0,
+      });
+    }
+  }
+
+  droneRelayDamage(projectile, firstEnemy) {
+    if (!projectile.droneArcDamagePerDrone || !projectile.droneArcRange) return;
+    const owner = this.players.get(projectile.ownerId);
+    const droneCount = owner?.stats.drones ?? 0;
+    if (droneCount <= 0) return;
+    const targets = this.nearestChainTargets(firstEnemy, new Set(projectile.hitEnemyIds ?? [firstEnemy.id]), projectile.droneArcRange, droneCount);
+    if (!targets.length) return;
+    const damage = projectile.damage * projectile.droneArcDamagePerDrone;
+    for (let i = 0; i < droneCount; i += 1) {
+      const target = targets[i % targets.length];
+      this.damageEnemy(target, damage, {
+        ownerId: projectile.ownerId,
+        x: firstEnemy.x,
+        y: firstEnemy.y,
+        vx: target.x - firstEnemy.x,
+        vy: target.y - firstEnemy.y,
       });
     }
   }
@@ -724,6 +1304,22 @@ export class GameSimulation {
   }
 
   nearestChainTarget(sourceEnemy, excludedIds, range) {
+    return this.nearestChainTargets(sourceEnemy, excludedIds, range, 1)[0] ?? null;
+  }
+
+  nearestChainTargets(sourceEnemy, excludedIds, range, count) {
+    const targets = [];
+    const blocked = new Set(excludedIds);
+    while (targets.length < count) {
+      const target = this.nearestChainTargetOnce(sourceEnemy, blocked, range);
+      if (!target) break;
+      targets.push(target);
+      blocked.add(target.id);
+    }
+    return targets;
+  }
+
+  nearestChainTargetOnce(sourceEnemy, excludedIds, range) {
     let nearest = null;
     let best = range * range;
     for (const enemy of this.enemies.values()) {
@@ -735,6 +1331,32 @@ export class GameSimulation {
       }
     }
     return nearest;
+  }
+
+  triggerKillVolley(enemy, owner) {
+    if (!owner.stats.killVolleyProjectiles || owner.stats.killVolleyDamageMultiplier <= 0) return;
+    const targets = this.nearestChainTargets(enemy, new Set(), owner.stats.killVolleyRange, owner.stats.killVolleyProjectiles);
+    const damage = owner.stats.damage * owner.stats.killVolleyDamageMultiplier;
+    for (const target of targets) {
+      const direction = normalize(target.x - enemy.x, target.y - enemy.y);
+      const projectile = createProjectile(
+        this.entityId(),
+        owner.id,
+        enemy.x + direction.x * (enemy.radius + 8),
+        enemy.y + direction.y * (enemy.radius + 8),
+        direction.x * owner.stats.projectileSpeed * 0.82,
+        direction.y * owner.stats.projectileSpeed * 0.82,
+        damage,
+        Math.max(3, owner.stats.projectileRadius - 1),
+        0.46,
+        {
+          pierce: 0,
+          color: "#ff5b79",
+          glowColor: "rgba(255, 91, 121, 0.45)",
+        },
+      );
+      this.projectiles.set(projectile.id, projectile);
+    }
   }
 
   spawnSplitChildren(enemy) {
@@ -752,12 +1374,14 @@ export class GameSimulation {
       );
       child.hitVx = Math.cos(angle) * 80;
       child.hitVy = Math.sin(angle) * 80;
+      this.applyEnemyScaling(child);
       this.enemies.set(child.id, child);
     }
   }
 
   spawnHitEffect(x, y, direction, damage, destroyed) {
     const effectId = this.entityId();
+    if (this.headless) return;
     this.effects.set(
       effectId,
       createEffect(effectId, destroyed ? "enemyDestroyed" : "projectileImpact", x, y, destroyed ? 92 : 42, destroyed ? 0.58 : 0.22),
@@ -784,7 +1408,7 @@ export class GameSimulation {
 
   spawnGravityBurst(player) {
     const effectId = this.entityId();
-    this.effects.set(effectId, createEffect(effectId, "gravityWell", player.x, player.y, 240, 0.46));
+    if (!this.headless) this.effects.set(effectId, createEffect(effectId, "gravityWell", player.x, player.y, 240, 0.46));
     for (const enemy of this.enemies.values()) {
       const dist = Math.sqrt(distanceSq(player.x, player.y, enemy.x, enemy.y));
       const radius = 240 * player.stats.area;
@@ -847,7 +1471,40 @@ export class GameSimulation {
         break;
       }
     }
-    if (!anyAlive) this.state = "gameover";
+    if (!anyAlive) {
+      this.state = "gameover";
+      this.outcome = "defeat";
+    }
+  }
+
+  checkRunOutcome() {
+    if (this.state !== "playing" && this.state !== "upgrade") return;
+    if (this.runMode === "normal" && this.elapsed >= GAME.normalRunSeconds) {
+      this.state = "victory";
+      this.outcome = "victory";
+    }
+  }
+
+  applyEnemyScaling(enemy) {
+    const difficulty = this.currentDifficulty();
+    const healthMultiplier = this.enemyHealthMultiplier * difficulty.healthMultiplier;
+    const speedMultiplier = this.enemySpeedMultiplier * difficulty.speedMultiplier;
+    if (healthMultiplier !== 1) {
+      enemy.maxHp *= healthMultiplier;
+      enemy.hp *= healthMultiplier;
+    }
+    if (speedMultiplier !== 1) {
+      enemy.speed *= speedMultiplier;
+    }
+  }
+
+  currentDifficulty() {
+    this.difficulty = difficultyAt(this.elapsed);
+    return this.difficulty;
+  }
+
+  effectiveSpawnMultiplier() {
+    return this.enemySpawnMultiplier * this.currentDifficulty().spawnMultiplier;
   }
 
   entityId() {
@@ -883,6 +1540,36 @@ export class GameSimulation {
   }
 }
 
+export function difficultyAt(elapsed) {
+  const safeElapsed = Math.max(0, Number.isFinite(elapsed) ? elapsed : 0);
+  const minutes = safeElapsed / 60;
+  const overrunSeconds = Math.max(0, safeElapsed - GAME.overrunStartsAt);
+  const overrunMinutes = overrunSeconds / 60;
+  const healthMultiplier = clamp(
+    1 + minutes * DIFFICULTY.healthPerMinute + overrunMinutes * DIFFICULTY.overrunHealthPerMinute,
+    1,
+    DIFFICULTY.maxHealthMultiplier,
+  );
+  const speedMultiplier = clamp(
+    1 + minutes * DIFFICULTY.speedPerMinute + overrunMinutes * DIFFICULTY.overrunSpeedPerMinute,
+    1,
+    DIFFICULTY.maxSpeedMultiplier,
+  );
+  const spawnMultiplier = clamp(
+    1 + minutes * DIFFICULTY.spawnPerMinute + overrunMinutes * DIFFICULTY.overrunSpawnPerMinute,
+    1,
+    DIFFICULTY.maxSpawnMultiplier,
+  );
+  return {
+    elapsed: safeElapsed,
+    overrun: safeElapsed >= GAME.overrunStartsAt,
+    overrunSeconds,
+    healthMultiplier,
+    speedMultiplier,
+    spawnMultiplier,
+  };
+}
+
 function buildTargetingCache(weapon) {
   const fastPath = weapon.strategy === "nearest";
   const allowedTypes =
@@ -890,4 +1577,12 @@ function buildTargetingCache(weapon) {
   const maxRangeSq = weapon.maxRange > 0 ? weapon.maxRange * weapon.maxRange : Infinity;
   const angleThreshold = Math.cos((weapon.firingAngleDegrees * Math.PI) / 180);
   return { fastPath, allowedTypes, maxRangeSq, angleThreshold };
+}
+
+function bossDefinitionColor(bossId) {
+  if (bossId === "brood-splitter") return "#ff9a3d";
+  if (bossId === "siphon-prime") return "#25d6ff";
+  if (bossId === "bastion-bulwark") return "#7c88ff";
+  if (bossId === "nova-spitter") return "#d7ff57";
+  return "#ff5b79";
 }

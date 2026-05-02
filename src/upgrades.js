@@ -11,6 +11,10 @@ export const UPGRADE_POOL = [
   statUpgrade("cargo-magnet", "Cargo Magnet", "common", "Collect cores from farther away.", 4, (player) => {
     player.stats.pickupRadius += 30;
   }),
+  statUpgrade("momentum-scoop", "Momentum Scoop", "common", "Collecting pickups grants a 1.2s speed burst.", 3, (player) => {
+    player.stats.pickupSpeedBurstDuration += 1.2;
+    player.stats.pickupSpeedBurstMultiplier += 0.1;
+  }),
   statUpgrade("capacitor-bank", "Capacitor Bank", "common", "Bolts last 20% longer.", 3, (player) => {
     player.stats.projectileTtl *= 1.2;
   }),
@@ -20,6 +24,10 @@ export const UPGRADE_POOL = [
   }),
   statUpgrade("combat-scavenger", "Combat Scavenger", "common", "Gain 10% more XP from cores.", 4, (player) => {
     player.stats.xpGain *= 1.1;
+  }),
+  statUpgrade("core-transmuter", "Core Transmuter", "common", "Every third XP core collected also yields 1 scrap.", 4, (player) => {
+    player.stats.xpPickupScrapEvery = 3;
+    player.stats.xpPickupScrapValue += 1;
   }),
   statUpgrade("reactive-plating", "Reactive Plating", "common", "Reduce incoming collision damage by 2.", 4, (player) => {
     player.stats.armor += 2;
@@ -48,8 +56,22 @@ export const UPGRADE_POOL = [
   statUpgrade("salvage-rig", "Salvage Rig", "rare", "Earn 12% more permanent scrap from this run.", 3, (player) => {
     player.stats.salvageBonus += 0.12;
   }),
+  statUpgrade("scrap-contract", "Scrap Contract", "rare", "Scrap pickups are worth 35% more and grant 1 XP.", 3, (player) => {
+    player.stats.scrapValueMultiplier *= 1.35;
+    player.stats.scrapGrantsXp += 1;
+  }),
+  statUpgrade("pulse-magnetron", "Pulse Magnetron", "rare", "Magnet pickups last 1.5s longer and pull from 160 farther out.", 3, (player) => {
+    player.stats.magnetPickupDurationBonus += 1.5;
+    player.stats.magnetBurstRadiusBonus += 160;
+  }),
   statUpgrade("med-bay-protocol", "Med-Bay Protocol", "rare", "Bruisers are more likely to drop repair shields.", 3, (player) => {
     player.stats.repairDropBonus += 0.08;
+  }),
+  statUpgrade("cache-codebreaker", "Cache Codebreaker", "rare", "Caches pay 50% more scrap and XP.", 3, (player) => {
+    player.stats.cacheValueBonus += 0.5;
+  }),
+  statUpgrade("survey-drones", "Survey Drones", "rare", "Future level-up choices favor rarer upgrade signals.", 2, (player) => {
+    player.stats.choiceQualityBonus += 0.35;
   }),
   statUpgrade("kinetic-capacitor", "Kinetic Capacitor", "rare", "Weapon hits gain up to 18% damage while moving at full thrust.", 3, (player) => {
     player.stats.velocityDamageBonus += 0.18;
@@ -59,6 +81,45 @@ export const UPGRADE_POOL = [
   }),
   statUpgrade("impact-shielding", "Impact Shielding", "rare", "Shielded collisions discharge 18 damage into the attacker.", 3, (player) => {
     player.stats.ramDamage += 18;
+  }),
+  statUpgrade("rail-accelerator", "Rail Accelerator", "rare", "Bolts accelerate in flight, up to 60% bonus speed.", 3, (player) => {
+    player.stats.projectileAcceleration += 0.9;
+    player.stats.projectileMaxSpeedMultiplier += 0.6;
+  }),
+  statUpgrade("thermite-jacket", "Thermite Jacket", "rare", "Projectile hits burn enemies for 10 damage per second.", 3, (player) => {
+    player.stats.burnDps += 10;
+    player.stats.burnDuration = Math.max(player.stats.burnDuration, 1.8);
+  }),
+  statUpgrade("hunter-mark", "Hunter Mark", "rare", "Projectile hits mark targets to take 18% more follow-up damage.", 3, (player) => {
+    player.stats.markDamageTakenMultiplier += 0.18;
+    player.stats.markDuration = Math.max(player.stats.markDuration, 2.2);
+  }),
+  statUpgrade("drone-relay", "Drone Relay", "rare", "Projectile hits call each drone to arc 25% weapon damage into a nearby enemy.", 3, (player) => {
+    player.stats.droneArcDamagePerDrone += 0.25;
+    player.stats.droneArcRange += 35;
+  }),
+  statUpgrade("aegis-reservoir", "Aegis Reservoir", "rare", "Shield pickups restore 20% more and can overcharge 30 extra shield.", 3, (player) => {
+    player.stats.maxShield += 30;
+    player.stats.shieldPickupMultiplier += 0.2;
+  }),
+  statUpgrade("flux-recharger", "Flux Recharger", "rare", "After 3 seconds without damage, rebuild 5 shield per second up to 25.", 3, (player) => {
+    player.stats.shieldRechargeRate += 5;
+    player.stats.shieldRechargeCap += 25;
+  }),
+  statUpgrade("ablative-matrix", "Ablative Matrix", "rare", "Every 25 active shield counts as 1 armor before incoming damage.", 3, (player) => {
+    player.stats.shieldArmorConversion += 1;
+  }),
+  statUpgrade("repulsor-field", "Repulsor Field", "rare", "Enemy contact throws attackers farther back after they hit you.", 3, (player) => {
+    player.stats.contactKnockback += 34;
+  }),
+  statUpgrade("trauma-nanites", "Trauma Nanites", "rare", "Once per run below 30% hull, repair 24 hull over 4 seconds.", 2, (player) => {
+    player.stats.crisisRepair += 24;
+  }),
+  statUpgrade("phase-bulwark", "Phase Bulwark", "rare", "Taking damage grants 0.12 seconds more invulnerability.", 3, (player) => {
+    player.stats.invulnerabilityBonus += 0.12;
+  }),
+  statUpgrade("mirror-plating", "Mirror Plating", "epic", "Reflect 35% of hull damage back into contact attackers.", 2, (player) => {
+    player.stats.hullDamageReflection += 0.35;
   }),
   statUpgrade("gravity-well", "Gravity Well", "epic", "Every tenth shot creates a singularity burst.", 3, (player) => {
     player.stats.gravityWell += 1;
@@ -70,6 +131,26 @@ export const UPGRADE_POOL = [
   statUpgrade("arc-conductor", "Arc Conductor", "epic", "Projectile hits chain lightning to a nearby enemy.", 3, (player) => {
     player.stats.chainArcs += 1;
     player.stats.chainDamageMultiplier += 0.12;
+  }),
+  statUpgrade("forked-conductor", "Forked Conductor", "epic", "Chain lightning forks from the first target into two nearby enemies.", 2, (player) => {
+    player.stats.chainForks += 2;
+    player.stats.chainDamageMultiplier += 0.08;
+  }),
+  statUpgrade("detonation-catalyst", "Detonation Catalyst", "epic", "Splash impacts hammer the main target harder for each enemy caught in the blast.", 2, (player) => {
+    player.stats.splashCenterBonusPerTarget += 0.18;
+    player.stats.splashDamageMultiplier = Math.max(player.stats.splashDamageMultiplier, 0.45);
+  }),
+  statUpgrade("execution-protocol", "Execution Protocol", "epic", "Critical hits execute enemies left below 12% hull.", 2, (player) => {
+    player.stats.critExecuteThreshold += 0.12;
+    player.stats.critChance += 0.04;
+  }),
+  statUpgrade("reaper-volley", "Reaper Volley", "epic", "Kills launch three seeking shards from the wreck into nearby enemies.", 2, (player) => {
+    player.stats.killVolleyProjectiles += 3;
+    player.stats.killVolleyDamageMultiplier += 0.08;
+  }),
+  statUpgrade("reclaimer-matrix", "Reclaimer Matrix", "epic", "Overflow repair and shield pickups convert into scrap.", 2, (player) => {
+    player.stats.repairOverflowScrap += 0.4;
+    player.stats.shieldOverflowScrap += 0.25;
   }),
   statUpgrade("twin-core-reactor", "Twin-Core Reactor", "epic", "Fire 24% faster, but max hull drops by 12.", 2, (player) => {
     player.stats.fireRate *= 1.24;
@@ -92,10 +173,10 @@ export function pickUpgradeChoices(rng, player, count = 3) {
   });
   const choices = [];
   while (choices.length < count && candidates.length) {
-    const totalWeight = candidates.reduce((sum, upgrade) => sum + rarityWeight(upgrade.rarity), 0);
+    const totalWeight = candidates.reduce((sum, upgrade) => sum + rarityWeight(upgrade.rarity, player), 0);
     let roll = rng.next() * totalWeight;
     const index = candidates.findIndex((upgrade) => {
-      roll -= rarityWeight(upgrade.rarity);
+      roll -= rarityWeight(upgrade.rarity, player);
       return roll <= 0;
     });
     choices.push(candidates.splice(Math.max(0, index), 1)[0]);
@@ -107,8 +188,10 @@ function statUpgrade(id, name, rarity, description, maxStacks, apply) {
   return { id, name, rarity, description, maxStacks, apply };
 }
 
-function rarityWeight(rarity) {
-  if (rarity === "epic") return 0.45;
-  if (rarity === "rare") return 1.25;
+function rarityWeight(rarity, player = null) {
+  const quality = Math.max(0, player?.stats?.choiceQualityBonus ?? 0);
+  if (rarity === "epic") return 0.45 * (1 + quality * 1.6);
+  if (rarity === "rare") return 1.25 * (1 + quality);
+  if (quality) return Math.max(0.45, 3 * (1 - quality * 0.45));
   return 3;
 }

@@ -11,3 +11,6 @@ coverage/
 *.log
 ppo-model.json
 .claude/
+
+netlify-drop/
+netlify-drop.zip

@@ -1,5 +1,15 @@
 import { GAME } from "./config.js";
-import { ENEMY_SHEET, loadEnemyImageSet, loadEnemySheet, loadSpriteSheet, loadUiSheet, SPRITE_SHEET, UI_SHEET } from "./assets.js";
+import {
+  ENEMY_SHEET,
+  loadBossImageSet,
+  loadBossPortraitImageSet,
+  loadEnemyImageSet,
+  loadEnemySheet,
+  loadSpriteSheet,
+  loadUiSheet,
+  SPRITE_SHEET,
+  UI_SHEET,
+} from "./assets.js";
 import { clamp } from "./math.js";
 
 export class Renderer {
@@ -16,6 +26,8 @@ export class Renderer {
     this.sprites = loadSpriteSheet();
     this.enemySprites = loadEnemySheet();
     this.enemyImages = loadEnemyImageSet();
+    this.bossImages = loadBossImageSet();
+    this.bossPortraitImages = loadBossPortraitImageSet();
     this.uiSprites = loadUiSheet();
     this.stars = createStarfield(420);
     this.particles = [];
@@ -27,6 +39,7 @@ export class Renderer {
     this.lastElapsed = 0;
     this.seenEffects = new Set();
     this.shake = 0;
+    this.cameraInitialized = false;
     this.hudState = {
       hpDisplay: 1,
       xpDisplay: 0,
@@ -55,14 +68,21 @@ export class Renderer {
     this.camera.scale = Math.min(rect.width / GAME.width, rect.height / GAME.height) * GAME.cameraZoom;
   }
 
+  screenToWorld(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    return {
+      x: this.camera.x + (x - this.viewport.width / 2) / this.camera.scale,
+      y: this.camera.y + (y - this.viewport.height / 2) / this.camera.scale,
+    };
+  }
+
   render(snapshot) {
     const dt = clamp(snapshot.elapsed - this.lastElapsed, 0, 1 / 20);
     this.lastElapsed = snapshot.elapsed;
     const player = snapshot.players.find((item) => item.id === snapshot.localPlayerId) ?? snapshot.players[0];
-    if (player) {
-      this.camera.x += (player.x - this.camera.x) * 0.12;
-      this.camera.y += (player.y - this.camera.y) * 0.12;
-    }
+    if (player) this.updateCamera(player, dt);
 
     this.ingestEffects(snapshot);
     if (this.options.particles) {
@@ -75,7 +95,7 @@ export class Renderer {
     this.clear();
     this.drawWorld(snapshot);
     this.drawHud(snapshot, player);
-    if (snapshot.state === "gameover") this.drawGameOver(snapshot);
+    if (snapshot.state === "gameover" || snapshot.state === "victory") this.drawGameOver(snapshot);
   }
 
   clear() {
@@ -101,6 +121,8 @@ export class Renderer {
     this.drawStars(renderCamera);
     if (this.options.lighting) this.drawLighting(snapshot);
     if (this.options.particles) this.drawParticles();
+    for (const event of snapshot.runEvents?.active ?? []) this.drawRunEvent(event, snapshot.elapsed);
+    if (snapshot.bossSpawnTelegraph) this.drawBossSpawnTelegraph(snapshot.bossSpawnTelegraph, snapshot.elapsed);
     for (const effect of snapshot.effects ?? []) this.drawEffect(effect);
     for (const pickup of snapshot.pickups) this.drawPickup(pickup, snapshot.elapsed);
     for (const projectile of snapshot.projectiles) this.drawProjectile(projectile, snapshot.elapsed);
@@ -110,6 +132,107 @@ export class Renderer {
     this.drawDamageNumbers();
 
     ctx.restore();
+    if (snapshot.bossSpawnTelegraph) this.drawBossSpawnVignette(snapshot.bossSpawnTelegraph, snapshot.elapsed);
+  }
+
+  drawRunEvent(event, elapsed) {
+    if (event.type === "laneSweep") {
+      this.drawLaneSweepEvent(event, elapsed);
+    } else if (event.type === "rewardCache") {
+      this.drawRewardCacheEvent(event, elapsed);
+    }
+  }
+
+  drawLaneSweepEvent(event, elapsed) {
+    const ctx = this.ctx;
+    const warningProgress = clamp((elapsed - event.startedAt) / Math.max(0.001, event.triggerAt - event.startedAt), 0, 1);
+    const activeProgress = clamp((elapsed - event.triggerAt) / Math.max(0.001, event.endAt - event.triggerAt), 0, 1);
+    const active = elapsed >= event.triggerAt;
+    const alpha = active ? 0.46 * (1 - activeProgress) : 0.14 + warningProgress * 0.2;
+    const stripeOffset = (elapsed * 180) % 42;
+    ctx.save();
+    ctx.translate(event.x, event.y);
+    ctx.rotate(Math.atan2(event.dirY, event.dirX));
+    ctx.fillStyle = active ? `rgba(255, 91, 121, ${alpha})` : `rgba(255, 200, 87, ${alpha})`;
+    ctx.fillRect(-event.length / 2, -event.width / 2, event.length, event.width);
+    ctx.strokeStyle = active ? "rgba(255, 91, 121, 0.88)" : "rgba(255, 200, 87, 0.78)";
+    ctx.lineWidth = active ? 6 : 3;
+    ctx.strokeRect(-event.length / 2, -event.width / 2, event.length, event.width);
+    ctx.globalAlpha = active ? 0.42 : 0.3 + warningProgress * 0.24;
+    ctx.strokeStyle = active ? "#ffd24a" : "#ff5b79";
+    ctx.lineWidth = 2;
+    for (let x = -event.length / 2 - event.width; x < event.length / 2 + event.width; x += 42) {
+      ctx.beginPath();
+      ctx.moveTo(x + stripeOffset, -event.width / 2);
+      ctx.lineTo(x + stripeOffset + event.width * 0.7, event.width / 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  drawRewardCacheEvent(event, elapsed) {
+    const ctx = this.ctx;
+    const warningProgress = clamp((elapsed - event.startedAt) / Math.max(0.001, event.triggerAt - event.startedAt), 0, 1);
+    const active = elapsed >= event.triggerAt;
+    const collapseProgress = event.collectedAt === null || event.collectedAt === undefined ? 0 : clamp((elapsed - event.collectedAt) / 0.4, 0, 1);
+    const pulse = 0.5 + Math.sin(elapsed * 8) * 0.5;
+    const radiusBase = active ? event.radius * (0.9 + pulse * 0.08) : event.radius * (0.55 + warningProgress * 0.45);
+    const radius = radiusBase * (1 - collapseProgress);
+    const alpha = 1 - collapseProgress;
+    if (radius <= 0.5 || alpha <= 0.01) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(event.x, event.y);
+    ctx.strokeStyle = active ? "rgba(255, 210, 74, 0.9)" : "rgba(100, 217, 255, 0.76)";
+    ctx.fillStyle = active ? "rgba(255, 210, 74, 0.12)" : "rgba(100, 217, 255, 0.08)";
+    ctx.lineWidth = active ? 4 : 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.rotate(elapsed * 0.9);
+    ctx.strokeStyle = active ? "rgba(255, 91, 121, 0.72)" : "rgba(255, 210, 74, 0.7)";
+    for (let i = 0; i < 4; i += 1) {
+      ctx.rotate(Math.PI / 2);
+      ctx.beginPath();
+      ctx.moveTo(radius * 0.72, 0);
+      ctx.lineTo(radius * 1.08, 0);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  updateCamera(player, dt) {
+    if (!this.cameraInitialized) {
+      this.camera.x = player.x;
+      this.camera.y = player.y;
+      this.cameraInitialized = true;
+      return;
+    }
+
+    const scale = Math.max(0.001, this.camera.scale);
+    const deadZone = 18 / scale;
+    const maxLag = Math.min(this.viewport.width, this.viewport.height) * 0.2 / scale;
+    const dx = player.x - this.camera.x;
+    const dy = player.y - this.camera.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= deadZone) return;
+
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const targetX = player.x - nx * deadZone;
+    const targetY = player.y - ny * deadZone;
+    const follow = 1 - Math.exp(-4.8 * Math.max(0, dt));
+    this.camera.x += (targetX - this.camera.x) * follow;
+    this.camera.y += (targetY - this.camera.y) * follow;
+
+    const lagX = player.x - this.camera.x;
+    const lagY = player.y - this.camera.y;
+    const lag = Math.hypot(lagX, lagY);
+    if (lag > maxLag) {
+      this.camera.x = player.x - (lagX / lag) * maxLag;
+      this.camera.y = player.y - (lagY / lag) * maxLag;
+    }
   }
 
   drawStars(camera = this.camera) {
@@ -256,6 +379,10 @@ export class Renderer {
       ctx.lineWidth = 2;
       ctx.stroke();
     }
+    if (enemy.rank === "boss") {
+      this.drawBossAura(enemy, bob, elapsed);
+      this.drawBossBodyOverlay(enemy, bob, elapsed);
+    } else if (enemy.rank === "elite" || enemy.eliteId) this.drawEliteAura(enemy, bob, elapsed);
     if (enemy.affixes?.length || enemy.eliteAffix) this.drawAffixAuras(enemy, bob, elapsed);
     if (hitFlash > 0) {
       ctx.save();
@@ -267,8 +394,294 @@ export class Renderer {
       ctx.fill();
       ctx.restore();
     }
-    ctx.fillStyle = "#1df2a4";
-    ctx.fillRect(enemy.x - enemy.radius, enemy.y + bob - enemy.radius - 10, enemy.radius * 2 * health, 3);
+    ctx.fillStyle = enemy.rank === "boss" ? bossColor(enemy) : enemy.rank === "elite" || enemy.eliteId ? "#ffc857" : "#1df2a4";
+    const barWidth = enemy.rank === "boss" ? enemy.radius * 2.7 : enemy.radius * 2;
+    const barHeight = enemy.rank === "boss" ? 5 : 3;
+    ctx.fillRect(enemy.x - barWidth / 2, enemy.y + bob - enemy.radius - 10, barWidth * health, barHeight);
+  }
+
+  drawEliteAura(enemy, bob, elapsed) {
+    const ctx = this.ctx;
+    const radius = enemy.radius + 14 + Math.sin(elapsed * 7 + numericId(enemy.id)) * 2;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(255, 200, 87, 0.75)";
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([12, 7]);
+    ctx.lineDashOffset = -elapsed * 32;
+    ctx.beginPath();
+    ctx.arc(enemy.x, enemy.y + bob, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawBossAura(enemy, bob, elapsed) {
+    if (enemy.bossId === "brood-splitter") return this.drawBroodSplitterAura(enemy, bob, elapsed);
+    if (enemy.bossId === "siphon-prime") return this.drawSiphonPrimeAura(enemy, bob, elapsed);
+    if (enemy.bossId === "bastion-bulwark") return this.drawBastionBulwarkAura(enemy, bob, elapsed);
+    if (enemy.bossId === "nova-spitter") return this.drawNovaSpitterAura(enemy, bob, elapsed);
+    return this.drawGenericBossAura(enemy, bob, elapsed);
+  }
+
+  drawGenericBossAura(enemy, bob, elapsed) {
+    const ctx = this.ctx;
+    const radius = enemy.radius + 18 + Math.sin(elapsed * 4 + numericId(enemy.id)) * 3;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = bossAuraColor(enemy);
+    ctx.lineWidth = 4;
+    ctx.setLineDash([18, 8, 4, 8]);
+    ctx.lineDashOffset = -elapsed * 24;
+    ctx.beginPath();
+    ctx.arc(enemy.x, enemy.y + bob, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = bossAuraColor(enemy);
+    ctx.beginPath();
+    ctx.arc(enemy.x, enemy.y + bob, radius * 0.92, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawBroodSplitterAura(enemy, bob, elapsed) {
+    const ctx = this.ctx;
+    const radius = enemy.radius + 20;
+    const health = clamp(enemy.hp / Math.max(1, enemy.maxHp), 0, 1);
+    const visibleSegments = Math.max(1, Math.ceil(health * 6));
+    const telegraph = bossTelegraphProgress(enemy, "split", elapsed, 0.8);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(255, 154, 61, 0.84)";
+    ctx.lineWidth = 4;
+    ctx.translate(enemy.x, enemy.y + bob);
+    ctx.rotate(elapsed * 0.6);
+    for (let i = 0; i < visibleSegments; i += 1) {
+      const start = (Math.PI * 2 * i) / 6;
+      ctx.globalAlpha = 0.55 + i * 0.055;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, start, start + Math.PI / 5);
+      ctx.stroke();
+    }
+    if (telegraph > 0.72) {
+      ctx.globalAlpha = (telegraph - 0.72) / 0.28;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(0, 0, enemy.radius * 0.92, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  drawSiphonPrimeAura(enemy, bob, elapsed) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.translate(enemy.x, enemy.y + bob);
+    ctx.strokeStyle = "rgba(37, 214, 255, 0.78)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([6, 4]);
+    ctx.lineDashOffset = -elapsed * 38;
+    ctx.beginPath();
+    ctx.arc(0, 0, enemy.radius + 18, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 9]);
+    ctx.lineDashOffset = elapsed * 58;
+    ctx.beginPath();
+    ctx.arc(0, 0, enemy.radius + 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    if ((enemy.siphonFor ?? 0) > 0 && Number.isFinite(enemy.siphonTargetX) && Number.isFinite(enemy.siphonTargetY)) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = "rgba(37, 214, 255, 0.55)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([10, 6]);
+      ctx.lineDashOffset = -elapsed * 60;
+      ctx.beginPath();
+      ctx.moveTo(enemy.x, enemy.y + bob);
+      ctx.lineTo(enemy.siphonTargetX, enemy.siphonTargetY);
+      ctx.stroke();
+      for (let i = 0; i < 5; i += 1) {
+        const t = (elapsed * 1.6 + i / 5) % 1;
+        const x = enemy.siphonTargetX + (enemy.x - enemy.siphonTargetX) * t;
+        const y = enemy.siphonTargetY + (enemy.y + bob - enemy.siphonTargetY) * t;
+        ctx.globalAlpha = 0.9 * (1 - t);
+        ctx.fillStyle = "#25d6ff";
+        ctx.beginPath();
+        ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  drawBastionBulwarkAura(enemy, bob, elapsed) {
+    const ctx = this.ctx;
+    const flash = clamp((enemy.armoredFlashFor ?? 0) / 0.25, 0, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.translate(enemy.x, enemy.y + bob);
+    ctx.rotate(elapsed * 0.2);
+    ctx.strokeStyle = flash > 0 ? `rgba(255, 255, 255, ${0.22 + flash * 0.68})` : "rgba(124, 136, 255, 0.78)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([2, 4]);
+    polygonPath(ctx, 0, 0, enemy.radius + 22, 6, -Math.PI / 6);
+    ctx.stroke();
+    const slam = bossTelegraphProgress(enemy, "slam", elapsed, 1);
+    if (slam > 0.65) {
+      const ringProgress = (slam - 0.65) / 0.35;
+      ctx.setLineDash([]);
+      ctx.strokeStyle = `rgba(124, 136, 255, ${0.75 * (1 - ringProgress)})`;
+      ctx.lineWidth = 6 * (1 - ringProgress);
+      ctx.beginPath();
+      ctx.arc(0, 0, enemy.radius + 60 * ringProgress, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  drawNovaSpitterAura(enemy, bob, elapsed) {
+    const ctx = this.ctx;
+    const radius = enemy.radius + 12;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(215, 255, 87, 0.76)";
+    ctx.lineWidth = 2;
+    ctx.translate(enemy.x, enemy.y + bob);
+    for (let i = 0; i < 12; i += 1) {
+      const jitter = seededNoise(numericId(enemy.id), i, Math.floor(elapsed * 30));
+      ctx.globalAlpha = 0.4 + jitter * 0.6;
+      const angle = (Math.PI * 2 * i) / 12 + Math.sin(elapsed * 4 + i) * 0.04;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
+      ctx.lineTo(Math.cos(angle) * (radius + 10), Math.sin(angle) * (radius + 10));
+      ctx.stroke();
+    }
+    const burst = bossTelegraphProgress(enemy, "burst", elapsed, 1);
+    if (burst > 0) {
+      const gradient = ctx.createRadialGradient(0, 0, enemy.radius * 0.4, 0, 0, enemy.radius + 90);
+      gradient.addColorStop(0, `rgba(255, 247, 192, ${0.45 * burst})`);
+      gradient.addColorStop(1, "rgba(215, 255, 87, 0)");
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, enemy.radius + 90, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  drawBossBodyOverlay(enemy, bob, elapsed) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.translate(enemy.x, enemy.y + bob);
+    if (enemy.bossId === "brood-splitter") {
+      const telegraph = bossTelegraphProgress(enemy, "split", elapsed, 0.8);
+      const orbitRadius = enemy.radius + 20 + telegraph * 30;
+      const squash = telegraph > 0 ? 1 - Math.sin(telegraph * Math.PI) * 0.22 + Math.max(0, telegraph - 0.65) * 0.8 : 1;
+      ctx.scale(1.08 / Math.max(0.4, squash), squash);
+      ctx.fillStyle = "rgba(255, 154, 61, 0.88)";
+      for (let i = 0; i < 3; i += 1) {
+        const angle = elapsed * Math.PI * 2 * 1.4 + (Math.PI * 2 * i) / 3;
+        drawShardGlyph(ctx, Math.cos(angle) * orbitRadius, Math.sin(angle) * orbitRadius, 5 + telegraph * 2, angle);
+      }
+    } else if (enemy.bossId === "siphon-prime") {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+      ctx.beginPath();
+      ctx.arc(0, 0, enemy.radius * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(37, 214, 255, 0.72)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, enemy.radius * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (enemy.bossId === "bastion-bulwark") {
+      const slam = bossTelegraphProgress(enemy, "slam", elapsed, 1);
+      const plateOffset = slam * 12;
+      ctx.fillStyle = "rgba(124, 136, 255, 0.55)";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.34)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 4; i += 1) {
+        ctx.save();
+        ctx.rotate((Math.PI / 2) * i + Math.sin(elapsed * 1.8 + numericId(enemy.id)) * 0.04);
+        ctx.beginPath();
+        ctx.moveTo(enemy.radius * 0.35, -enemy.radius * 0.24);
+        ctx.lineTo(enemy.radius + plateOffset, -enemy.radius * 0.36);
+        ctx.lineTo(enemy.radius + plateOffset, enemy.radius * 0.36);
+        ctx.lineTo(enemy.radius * 0.35, enemy.radius * 0.24);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    } else if (enemy.bossId === "nova-spitter") {
+      const burst = bossTelegraphProgress(enemy, "burst", elapsed, 1);
+      const orbitRadius = enemy.radius * (0.7 - burst * 0.45);
+      for (let i = 0; i < 3; i += 1) {
+        const angle = elapsed * Math.PI * 2 * (3 + burst * 3) + (Math.PI * 2 * i) / 3;
+        const x = Math.cos(angle) * orbitRadius;
+        const y = Math.sin(angle) * orbitRadius;
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, 8);
+        gradient.addColorStop(0, "#fff7c0");
+        gradient.addColorStop(1, "rgba(215, 255, 87, 0)");
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  drawBossSpawnTelegraph(telegraph, elapsed) {
+    const ctx = this.ctx;
+    const progress = clamp((elapsed - telegraph.startedAt) / Math.max(0.001, telegraph.duration), 0, 1);
+    const ease = progress * progress * (3 - progress * 2);
+    const radius = 10 + ease * 80;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.translate(telegraph.x, telegraph.y);
+    ctx.strokeStyle = hexToRgba(telegraph.color, 0.85 * (1 - progress * 0.35));
+    ctx.lineWidth = 3 - progress * 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 6; i += 1) {
+      const angle = (Math.PI * 2 * i) / 6 + elapsed * 0.18;
+      const r = 160 - ease * 140;
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle + Math.PI);
+      ctx.strokeStyle = hexToRgba(telegraph.color, 0.78);
+      ctx.beginPath();
+      ctx.moveTo(-10, -8);
+      ctx.lineTo(0, 0);
+      ctx.lineTo(-10, 8);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  drawBossSpawnVignette(telegraph, elapsed) {
+    const timeLeft = telegraph.triggerAt - elapsed;
+    if (timeLeft > 0.4) return;
+    const progress = clamp(1 - timeLeft / 0.4, 0, 1);
+    const ctx = this.ctx;
+    const { width, height } = this.viewport;
+    const gradient = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.32, width / 2, height / 2, Math.max(width, height) * 0.72);
+    gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+    gradient.addColorStop(1, hexToRgba(telegraph.color, 0.18 * Math.sin(progress * Math.PI)));
+    ctx.save();
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
   }
 
   drawAffixAuras(enemy, bob, elapsed) {
@@ -276,7 +689,9 @@ export class Renderer {
     const affixes = enemy.affixes?.length ? enemy.affixes : [enemy.eliteAffix];
     for (let i = 0; i < affixes.length; i += 1) {
       const style = affixAuraStyle(affixes[i]);
-      const radius = enemy.radius + 8 + i * 7 + Math.sin(elapsed * style.pulse + i) * 1.5;
+      const volatileWarning = affixes[i] === "volatile" && (enemy.hp / Math.max(1, enemy.maxHp) <= 0.18 || (enemy.volatileBurstIn ?? Infinity) <= 0.6);
+      const pulse = volatileWarning ? 22 : style.pulse;
+      const radius = enemy.radius + 8 + i * 7 + Math.sin(elapsed * pulse + i) * 1.5;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.strokeStyle = style.stroke;
@@ -291,6 +706,13 @@ export class Renderer {
         const angle = elapsed * style.spin * 0.08 * style.dashDirection + (Math.PI * 2 * dot) / style.dots;
         ctx.beginPath();
         ctx.arc(enemy.x + Math.cos(angle) * radius, enemy.y + bob + Math.sin(angle) * radius, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (volatileWarning) {
+        ctx.globalAlpha = Math.max(0, Math.sin(elapsed * Math.PI * 22));
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.arc(enemy.x, enemy.y + bob, enemy.radius * 0.4, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
@@ -363,7 +785,8 @@ export class Renderer {
       effect.type !== "overdrive" &&
       effect.type !== "magnetBurst" &&
       effect.type !== "cacheOpened" &&
-      effect.type !== "volatileBurst"
+      effect.type !== "volatileBurst" &&
+      effect.type !== "bossSpawnBurst"
     ) {
       return;
     }
@@ -378,6 +801,13 @@ export class Renderer {
       this.drawGlow(effect.x, effect.y, size, "rgba(255, 91, 121, 0.44)");
       this.ctx.strokeStyle = `rgba(255, 200, 87, ${0.82 * (1 - progress)})`;
       this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.arc(effect.x, effect.y, size * 0.5, 0, Math.PI * 2);
+      this.ctx.stroke();
+    } else if (effect.type === "bossSpawnBurst") {
+      this.drawGlow(effect.x, effect.y, size, "rgba(255, 255, 255, 0.36)");
+      this.ctx.strokeStyle = `rgba(255, 255, 255, ${0.7 * (1 - progress)})`;
+      this.ctx.lineWidth = 5 * (1 - progress);
       this.ctx.beginPath();
       this.ctx.arc(effect.x, effect.y, size * 0.5, 0, Math.PI * 2);
       this.ctx.stroke();
@@ -519,6 +949,11 @@ export class Renderer {
         if (this.options.particles) {
           this.emitImpactParticles(effect, 46, "rgba(255, 91, 121, 0.9)", "rgba(255, 200, 87, 0.88)");
         }
+      } else if (effect.type === "bossSpawnBurst") {
+        if (this.options.screenShake) this.shake = Math.max(this.shake, 5);
+        if (this.options.particles) {
+          this.emitRadialParticles(effect, 60, "rgba(255, 255, 255, 0.85)", "rgba(255, 200, 87, 0.82)");
+        }
       }
     }
     this.seenEffects = new Set([...this.seenEffects].filter((id) => activeIds.has(id)));
@@ -610,6 +1045,26 @@ export class Renderer {
         vy,
         size: this.randomRange(2.2, effect.type === "enemyDestroyed" ? 5.8 : 4.2),
         color: this.random() < 0.72 ? primaryColor : secondaryColor,
+        ttl,
+        life: ttl,
+        drag: 0.9,
+        alpha: this.randomRange(0.72, 1),
+      });
+    }
+  }
+
+  emitRadialParticles(effect, count, primaryColor, secondaryColor) {
+    for (let i = 0; i < count; i += 1) {
+      const angle = (Math.PI * 2 * i) / count + this.randomRange(-0.08, 0.08);
+      const speed = this.randomRange(110, 320);
+      const ttl = this.randomRange(0.32, 0.84);
+      this.particles.push({
+        x: effect.x + Math.cos(angle) * this.randomRange(2, 12),
+        y: effect.y + Math.sin(angle) * this.randomRange(2, 12),
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: this.randomRange(2.4, 5.4),
+        color: this.random() < 0.62 ? primaryColor : secondaryColor,
         ttl,
         life: ttl,
         drag: 0.9,
@@ -797,13 +1252,25 @@ export class Renderer {
       ctx.restore();
 
       this.drawUiIcon("target", tx + 38, ty + 30, 36, 36);
+      const aimAssist = snapshot.aimAssist ?? null;
+      const assistOn = Boolean(aimAssist?.enabled);
+      const accent = assistOn ? "#64d9ff" : "#ffeef1";
+      const labelColor = assistOn ? "rgba(170, 226, 255, 0.78)" : "rgba(255, 178, 192, 0.7)";
       ctx.font = "900 9px Inter, system-ui, sans-serif";
-      ctx.fillStyle = "rgba(255, 178, 192, 0.7)";
+      ctx.fillStyle = labelColor;
       ctx.textAlign = "left";
-      ctx.fillText("TARGETING DOCTRINE", tx + 64, ty + 18);
+      ctx.fillText("WEAPON AIM", tx + 64, ty + 18);
       ctx.font = "900 16px Inter, system-ui, sans-serif";
-      ctx.fillStyle = "#ffeef1";
-      ctx.fillText(target ? target.strategy.toUpperCase() : "AUTO TARGET", tx + 64, ty + 38);
+      ctx.fillStyle = accent;
+      const aimText = assistOn
+        ? `AUTO • ${aimAssist.modeLabel ?? "NEAREST"}`
+        : target ? "MANUAL VECTOR" : "MANUAL AIM";
+      ctx.fillText(aimText, tx + 64, ty + 38);
+      if (aimAssist) {
+        ctx.font = "700 8px Inter, system-ui, sans-serif";
+        ctx.fillStyle = "rgba(170, 226, 255, 0.55)";
+        ctx.fillText("T TOGGLE • Y CYCLE", tx + 64, ty + 76);
+      }
 
       const contacts = snapshot.enemies.length;
       ctx.font = "700 10px Inter, system-ui, sans-serif";
@@ -841,6 +1308,9 @@ export class Renderer {
       ctx.fillText("CONTACTS", tx + tw - 14, ty + 56);
       ctx.textAlign = "left";
     }
+
+    this.drawBossHud(snapshot, pad, t);
+    this.drawRunEventAlert(snapshot);
 
     // === XP BAR — full-width hero element, bottom edge ===
     const xpH = 22;
@@ -979,6 +1449,22 @@ export class Renderer {
     ctx.shadowBlur = 0;
     ctx.restore();
 
+    // In-run scrap counter — left of EXPERIENCE
+    ctx.save();
+    const scrapVal = Math.floor(player.scrap ?? 0);
+    ctx.font = "900 9px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(255, 200, 87, 0.7)";
+    ctx.textAlign = "right";
+    const scrapRightX = vw - pad - 130;
+    ctx.fillText("SCRAP", scrapRightX, xpY - 8);
+    ctx.font = "900 14px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffd9a3";
+    ctx.shadowColor = "rgba(255, 176, 32, 0.6)";
+    ctx.shadowBlur = 8;
+    ctx.fillText(`⬢ ${scrapVal}`, scrapRightX, xpY + xpH + 16);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
     // Vignette pulse on heavy damage
     if (hs.damagePulse > 0.05) {
       const a = hs.damagePulse * 0.32;
@@ -1009,6 +1495,80 @@ export class Renderer {
       ctx.restore();
     }
 
+    ctx.restore();
+  }
+
+  drawBossHud(snapshot, pad, elapsed) {
+    const bosses = snapshot.enemies.filter((enemy) => enemy.rank === "boss" && enemy.hp > 0);
+    if (!bosses.length) return;
+    const boss = bosses.reduce((lowest, enemy) => (enemy.hp / enemy.maxHp < lowest.hp / lowest.maxHp ? enemy : lowest), bosses[0]);
+    const ctx = this.ctx;
+    const width = Math.min(564, this.viewport.width - pad * 2);
+    const barWidth = Math.max(180, width - 44);
+    const height = 18;
+    const x = (this.viewport.width - width) / 2;
+    const barX = x + 44;
+    const y = this.viewport.width < 760 ? pad + 126 : pad + 84;
+    const health = clamp(boss.hp / Math.max(1, boss.maxHp), 0, 1);
+    const accent = bossColor(boss);
+    const chipAccent = health < 0.25 ? mixHex(accent, "#ff5b79", 0.5 + Math.sin(elapsed * Math.PI * 4) * 0.5) : accent;
+    ctx.save();
+    chamferedRectPath(ctx, x, y - 9, 36, 36, 7);
+    ctx.fillStyle = "rgba(4, 9, 20, 0.85)";
+    ctx.fill();
+    ctx.strokeStyle = chipAccent;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    this.drawBossPortrait(boss, x + 18, y + 9, 32, 32);
+    ctx.font = "900 10px Inter, system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(255, 238, 241, 0.86)";
+    ctx.fillText(formatBossName(boss), barX, y - 6);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "rgba(255, 178, 192, 0.78)";
+    ctx.fillText(`PHASE ${boss.phase ?? 1}`, barX + barWidth, y - 6);
+    this.drawStatBar(barX, y, barWidth, height, health, accent, {
+      label: "",
+      value: "",
+      glow: 0.9 + Math.sin(elapsed * 5) * 0.18,
+      ticks: 8,
+      time: elapsed,
+    });
+    ctx.restore();
+  }
+
+  drawRunEventAlert(snapshot) {
+    const alert = snapshot.runEvents?.alert;
+    const activeEvent = snapshot.runEvents?.active?.find((event) => snapshot.elapsed < event.triggerAt) ?? null;
+    if (!alert && !activeEvent) return;
+    const ctx = this.ctx;
+    const vw = this.viewport.width;
+    const pad = vw < 520 ? 10 : 18;
+    const width = vw < 560 ? Math.min(300, vw - pad * 2) : 330;
+    const height = 46;
+    const x = vw / 2 - width / 2;
+    const y = vw >= 720 ? 82 : 132;
+    const label = activeEvent?.label ?? alert?.label ?? "RUN EVENT";
+    const remaining = Math.max(0, activeEvent ? activeEvent.triggerAt - snapshot.elapsed : alert?.timeRemaining ?? 0);
+    const pulse = 0.55 + Math.sin(snapshot.elapsed * 9) * 0.25;
+
+    ctx.save();
+    this.drawNeonPanel(x, y, width, height, "#ffc857", 0.58 + pulse * 0.12, 8);
+    this.drawUiIcon("warning", x + 25, y + height / 2, 28, 24);
+    ctx.font = "900 10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(255, 210, 74, 0.78)";
+    ctx.textAlign = "left";
+    ctx.fillText("EVENT WARNING", x + 48, y + 17);
+    ctx.font = "900 15px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#fff3cf";
+    ctx.shadowColor = "rgba(255, 200, 87, 0.65)";
+    ctx.shadowBlur = 8;
+    ctx.fillText(label.toUpperCase(), x + 48, y + 34);
+    ctx.shadowBlur = 0;
+    ctx.textAlign = "right";
+    ctx.font = "900 18px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ff5b79";
+    ctx.fillText(`${remaining.toFixed(1)}s`, x + width - 14, y + 30);
     ctx.restore();
   }
 
@@ -1259,18 +1819,21 @@ export class Renderer {
     this.hudState.gameOverIn = Math.min(1, this.hudState.gameOverIn + 0.04);
     const t = this.hudState.gameOverIn;
     const elapsed = this.lastElapsed;
+    const victory = snapshot.state === "victory" || snapshot.outcome === "victory";
+    const accent = victory ? "#64d9ff" : "#ff5b79";
+    const secondary = victory ? "#ffd24a" : "#64d9ff";
 
     ctx.save();
 
     // Vignette + scanlines
     const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7);
-    grad.addColorStop(0, `rgba(40, 0, 12, ${0.5 * t})`);
+    grad.addColorStop(0, victory ? `rgba(0, 34, 48, ${0.5 * t})` : `rgba(40, 0, 12, ${0.5 * t})`);
     grad.addColorStop(1, `rgba(2, 4, 10, ${0.92 * t})`);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
 
     ctx.globalAlpha = 0.18 * t;
-    ctx.fillStyle = "#ff5b79";
+    ctx.fillStyle = accent;
     for (let y = 0; y < h; y += 4) {
       ctx.fillRect(0, y, w, 1);
     }
@@ -1278,16 +1841,16 @@ export class Renderer {
 
     // Glitch title (offset chromatic copies)
     ctx.textAlign = "center";
-    const title = "SIGNAL LOST";
+    const title = victory ? "RUN COMPLETE" : "SIGNAL LOST";
     const titleY = h / 2 - 30;
     const jitter = (Math.sin(elapsed * 12) * 2 + Math.sin(elapsed * 33) * 1.4) * t;
     ctx.font = "900 64px Inter, system-ui, sans-serif";
-    ctx.fillStyle = `rgba(100, 217, 255, ${0.7 * t})`;
+    ctx.fillStyle = hexToRgba(secondary, 0.7 * t);
     ctx.fillText(title, w / 2 - 4 + jitter, titleY);
-    ctx.fillStyle = `rgba(255, 91, 121, ${0.7 * t})`;
+    ctx.fillStyle = hexToRgba(accent, 0.7 * t);
     ctx.fillText(title, w / 2 + 4 - jitter, titleY);
     ctx.fillStyle = `rgba(255, 248, 240, ${t})`;
-    ctx.shadowColor = "rgba(255, 91, 121, 0.8)";
+    ctx.shadowColor = hexToRgba(accent, 0.8);
     ctx.shadowBlur = 24;
     ctx.fillText(title, w / 2, titleY);
     ctx.shadowBlur = 0;
@@ -1295,20 +1858,22 @@ export class Renderer {
     // Subtitle bar
     ctx.font = "800 12px Inter, system-ui, sans-serif";
     ctx.fillStyle = `rgba(255, 200, 87, ${t})`;
-    ctx.fillText("// MISSION TERMINATED //", w / 2, titleY + 26);
+    ctx.fillText(victory ? "// EXTRACTION WINDOW REACHED //" : "// MISSION TERMINATED //", w / 2, titleY + 26);
 
     // Stats panel
-    const pw = 480;
+    const reward = snapshot.runReward ?? null;
+    const pw = 620;
     const ph = 110;
     const px = w / 2 - pw / 2;
     const py = titleY + 50;
     ctx.globalAlpha = t;
-    this.drawNeonPanel(px, py, pw, ph, "#ff5b79", 0.78, 14);
+    this.drawNeonPanel(px, py, pw, ph, accent, 0.78, 14);
 
     const cells = [
       { label: "SURVIVED", value: formatTime(elapsed), color: "#64d9ff" },
       { label: "WAVE REACHED", value: String(snapshot.wave), color: "#b86cff" },
       { label: "FINAL LEVEL", value: String(snapshot.players?.[0]?.level ?? 1), color: "#ffd24a" },
+      { label: "SCRAP EARNED", value: reward ? `${Math.round(reward.scrap)} ⬢` : "— ⬢", color: "#ffb020" },
     ];
     const cellW = pw / cells.length;
     cells.forEach((cell, i) => {
@@ -1323,7 +1888,7 @@ export class Renderer {
       ctx.fillText(cell.value, cx, py + 76);
       ctx.shadowBlur = 0;
       if (i < cells.length - 1) {
-        ctx.strokeStyle = "rgba(255, 91, 121, 0.3)";
+        ctx.strokeStyle = hexToRgba(accent, 0.3);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(px + (i + 1) * cellW, py + 18);
@@ -1331,6 +1896,30 @@ export class Renderer {
         ctx.stroke();
       }
     });
+
+    if (reward?.breakdown) {
+      const b = reward.breakdown;
+      const secPart = `${b.seconds}s × 0.75`;
+      const killPart = `${b.kills} kills × 4`;
+      const wavePart = `wave ${snapshot.wave} × 35`;
+      const collectedPart = `${b.collected} collected`;
+      const breakdownLine = `${secPart} + ${killPart} + ${wavePart} + ${collectedPart} = ${Math.round(reward.scrap)}`;
+      ctx.font = "700 12px Inter, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(237, 247, 255, 0.78)";
+      ctx.fillText(breakdownLine, w / 2, py + ph + 22);
+      if (b.charterBonus > 0) {
+        ctx.fillStyle = "rgba(255, 200, 87, 0.85)";
+        ctx.fillText(`(+${Math.round(b.charterBonus * 100)}% Charter)`, w / 2, py + ph + 40);
+      }
+    }
+
+    ctx.font = "800 11px Inter, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(100, 217, 255, 0.78)";
+    ctx.fillText("Open Armory to spend", w / 2, py + ph + (reward?.breakdown?.charterBonus > 0 ? 60 : 44));
+    ctx.textAlign = "left";
+
     ctx.globalAlpha = 1;
 
     ctx.restore();
@@ -1364,8 +1953,17 @@ export class Renderer {
     return this.drawSheetSprite(this.uiSprites, UI_SHEET.sprites, name, x, y, width, height, rotation);
   }
 
+  drawBossPortrait(enemy, x, y, width, height) {
+    const key = bossPortraitSpriteName(enemy);
+    const image = this.bossPortraitImages[key];
+    if (image?.ready) return this.drawImageSprite(image.image, x, y, width, height, 0);
+    return false;
+  }
+
   drawEnemySprite(name, x, y, width, height, rotation = 0) {
     if (SPRITE_SHEET.sprites[name]) return this.drawSprite(name, x, y, width, height, rotation);
+    const bossImage = this.bossImages[name];
+    if (bossImage?.ready) return this.drawImageSprite(bossImage.image, x, y, width, height, rotation);
     const image = this.enemyImages[name];
     if (image?.ready) return this.drawImageSprite(image.image, x, y, width, height, rotation);
     return this.drawSheetSprite(this.enemySprites, ENEMY_SHEET.sprites, name, x, y, width, height, rotation);
@@ -1490,6 +2088,7 @@ function formatTime(totalSeconds) {
 function formatDamage(value) {
   if (!Number.isFinite(value)) return "0";
   if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
+  if (value > 0 && value < 1) return Math.max(0.1, value).toFixed(1);
   return String(Math.round(value));
 }
 
@@ -1499,7 +2098,55 @@ function numericId(id) {
     .reduce((total, char) => total + char.charCodeAt(0), 0);
 }
 
+function bossTelegraphProgress(enemy, type, elapsed, duration) {
+  if (enemy.bossTelegraph?.type !== type) return 0;
+  return clamp((elapsed - enemy.bossTelegraph.startedAt) / Math.max(0.001, duration), 0, 1);
+}
+
+function drawShardGlyph(ctx, x, y, radius, rotation) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+  ctx.beginPath();
+  ctx.moveTo(radius * 1.5, 0);
+  ctx.lineTo(-radius * 0.35, -radius);
+  ctx.lineTo(-radius * 0.85, 0);
+  ctx.lineTo(-radius * 0.35, radius);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function polygonPath(ctx, x, y, radius, sides, rotation = 0) {
+  ctx.beginPath();
+  for (let i = 0; i < sides; i += 1) {
+    const angle = rotation + (Math.PI * 2 * i) / sides;
+    const px = x + Math.cos(angle) * radius;
+    const py = y + Math.sin(angle) * radius;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+function seededNoise(seed, index, frame) {
+  const value = Math.sin(seed * 12.9898 + index * 78.233 + frame * 37.719) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function mixHex(a, b, t) {
+  const ar = Number.parseInt(a.slice(1, 3), 16);
+  const ag = Number.parseInt(a.slice(3, 5), 16);
+  const ab = Number.parseInt(a.slice(5, 7), 16);
+  const br = Number.parseInt(b.slice(1, 3), 16);
+  const bg = Number.parseInt(b.slice(3, 5), 16);
+  const bb = Number.parseInt(b.slice(5, 7), 16);
+  const mix = (from, to) => Math.round(from + (to - from) * clamp(t, 0, 1)).toString(16).padStart(2, "0");
+  return `#${mix(ar, br)}${mix(ag, bg)}${mix(ab, bb)}`;
+}
+
 function enemySpriteName(enemy) {
+  if (enemy.rank === "boss" || enemy.bossId) return bossSpriteName(enemy);
   if (enemy.type === "drone") return "enemyDrone";
   if (enemy.type === "bruiser") return "enemyBruiser";
   if (enemy.type === "charger") return "enemyCharger";
@@ -1510,6 +2157,22 @@ function enemySpriteName(enemy) {
   if (enemy.type === "spitter") return "enemySpitter";
   if (enemy.type === "bulwark") return "enemyBulwark";
   if (enemy.type === "shard") return "enemyShard";
+  return null;
+}
+
+function bossSpriteName(enemy) {
+  if (enemy.bossId === "brood-splitter") return "bossBroodSplitter";
+  if (enemy.bossId === "siphon-prime") return "bossSiphonPrime";
+  if (enemy.bossId === "bastion-bulwark") return "bossBastionBulwark";
+  if (enemy.bossId === "nova-spitter") return "bossNovaSpitter";
+  return null;
+}
+
+function bossPortraitSpriteName(enemy) {
+  if (enemy.bossId === "brood-splitter") return "portraitBroodSplitter";
+  if (enemy.bossId === "siphon-prime") return "portraitSiphonPrime";
+  if (enemy.bossId === "bastion-bulwark") return "portraitBastionBulwark";
+  if (enemy.bossId === "nova-spitter") return "portraitNovaSpitter";
   return null;
 }
 
@@ -1552,7 +2215,33 @@ function enemyFillColor(enemy) {
   return "#ff5b79";
 }
 
+function bossColor(enemy) {
+  if (enemy.bossId === "brood-splitter") return "#ff9a3d";
+  if (enemy.bossId === "siphon-prime") return "#25d6ff";
+  if (enemy.bossId === "bastion-bulwark") return "#7c88ff";
+  if (enemy.bossId === "nova-spitter") return "#d7ff57";
+  return "#ff5b79";
+}
+
+function bossAuraColor(enemy) {
+  if (enemy.bossId === "brood-splitter") return "rgba(255, 154, 61, 0.78)";
+  if (enemy.bossId === "siphon-prime") return "rgba(37, 214, 255, 0.76)";
+  if (enemy.bossId === "bastion-bulwark") return "rgba(124, 136, 255, 0.78)";
+  if (enemy.bossId === "nova-spitter") return "rgba(215, 255, 87, 0.74)";
+  return "rgba(255, 91, 121, 0.78)";
+}
+
+function formatBossName(enemy) {
+  const id = enemy.bossId ?? enemy.eliteId ?? enemy.type;
+  return id
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function enemyGlowColor(enemy) {
+  if (enemy.rank === "boss") return bossAuraColor(enemy);
+  if (enemy.rank === "elite" || enemy.eliteId) return "rgba(255, 200, 87, 0.3)";
   if (enemy.affixes?.includes("volatile")) return "rgba(255, 91, 121, 0.32)";
   if (enemy.affixes?.includes("regenerating")) return "rgba(60, 255, 148, 0.28)";
   if (enemy.affixes?.includes("armored") || enemy.eliteAffix === "armored") return "rgba(140, 245, 255, 0.28)";
@@ -1569,6 +2258,8 @@ function enemyGlowColor(enemy) {
 }
 
 function enemyGlowRadius(enemy) {
+  if (enemy.rank === "boss") return enemy.radius + 76;
+  if (enemy.rank === "elite" || enemy.eliteId) return enemy.radius + 58;
   if (enemy.affixes?.length || enemy.eliteAffix) return enemy.type === "bruiser" || enemy.type === "bulwark" ? 98 : 70 + (enemy.affixes?.length ?? 1) * 8;
   if (enemy.type === "bulwark") return 82;
   if (enemy.type === "bruiser") return 76;

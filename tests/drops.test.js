@@ -98,7 +98,8 @@ test("shield pickups absorb contact damage before hull", () => {
   simulation.updateEnemies(0);
 
   assert.equal(player.shield, 0);
-  assert.equal(player.hp, player.stats.maxHp - (enemy.damage - 10));
+  const incoming = Math.max(1, enemy.damage - player.stats.armor);
+  assert.equal(player.hp, player.stats.maxHp - (incoming - 10));
 });
 
 test("collected scrap contributes to end-of-run scrap reward", () => {

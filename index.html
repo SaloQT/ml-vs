@@ -26,13 +26,19 @@
             <h1>Space Survivors</h1>
           </div>
 
+          <div id="menu-scrap-badge" class="menu-scrap-badge" aria-label="Scrap reserve">
+            <span class="menu-scrap-glyph" aria-hidden="true">&#x2B22;</span>
+            <strong id="menu-scrap-count">0</strong>
+            <small>Scrap Reserve</small>
+          </div>
+
           <div class="menu-actions">
-            <button id="start-run" class="launch-button" type="button">
-              <span class="launch-icon" aria-hidden="true"></span>
-              <span>Launch Run</span>
-            </button>
+            <div id="launch-controls" class="launch-controls"></div>
             <div class="menu-secondary">
-              <button id="open-armory" type="button">Armory</button>
+              <button id="open-armory" type="button">
+                <span class="armory-label">Armory</span>
+                <span class="armory-scrap" id="open-armory-scrap" aria-hidden="true"></span>
+              </button>
               <button id="open-options" type="button">Options</button>
               <button id="open-ppo" type="button">PPO Lab</button>
             </div>
@@ -58,24 +64,8 @@
         </div>
 
         <div id="armory-panel" class="systems-panel hidden" role="dialog" aria-modal="true" aria-labelledby="armory-title">
-          <div class="systems-card wide">
-            <div class="options-title">
-              <span>Permanent Progression</span>
-              <h2 id="armory-title">Armory</h2>
-            </div>
-            <div class="armory-command">
-              <div class="scrap-bank"><strong id="scrap-count">0</strong><small>Scrap Reserve</small></div>
-              <div class="armory-status">
-                <span>Loadout Bay</span>
-                <strong>Systems online</strong>
-              </div>
-            </div>
-            <h3>Permanent Systems</h3>
-            <div id="permanent-upgrades" class="systems-list armory-upgrades"></div>
-            <h3>Equipment Slots</h3>
-            <div id="equipment-list" class="equipment-list"></div>
-            <div class="options-actions"><button id="close-armory" type="button">Back</button></div>
-          </div>
+          <h2 id="armory-title" class="visually-hidden">Armory</h2>
+          <div id="armory-root" class="armory-root"></div>
         </div>
 
         <div id="ppo-panel" class="systems-panel hidden" role="dialog" aria-modal="true" aria-labelledby="ppo-title">
@@ -124,17 +114,27 @@
               <div class="ppo-sidebar-row" data-tooltip-title="Clip Epsilon" data-tooltip-body="Limits how far a PPO update can push action probabilities from the previous policy. Example: 0.12 keeps updates conservative; 0.3 allows bigger jumps but can forget useful behavior."><span>Clip &epsilon;</span><input id="ppo-clip" type="number" min="0.01" max="0.5" step="0.01" value="0.12" aria-label="Clip epsilon" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="Gamma" data-tooltip-body="Discounts future rewards when scoring decisions. Example: 0.985 makes the agent value survival and upgrade payoffs many seconds later; 0.9 focuses more on immediate kills and damage."><span>Gamma</span><input id="ppo-gamma" type="number" min="0.9" max="1" step="0.001" value="0.985" aria-label="Discount factor" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="Batch Size" data-tooltip-body="Episodes simulated before one policy update. Example: 2 updates quickly for interactive tuning; 16 gives smoother gradients but each training step takes longer."><span>Batch Size</span><input id="ppo-batch" type="number" min="1" max="32" step="1" value="2" aria-label="Episodes per update" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Rollout Workers" data-tooltip-body="Parallel browser workers used to simulate PPO episodes. Example: 1 is easiest on the CPU; 4-6 can train faster on multi-core machines."><span>Workers</span><input id="ppo-workers" type="number" min="1" max="12" step="1" value="2" aria-label="PPO rollout workers" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="Game Length" data-tooltip-body="Maximum simulated seconds per training episode. Example: 45 trains short survival runs quickly; 120 lets the policy learn later waves and long-term upgrade value."><span>Game Length</span><input id="ppo-game-length" type="number" min="10" max="300" step="5" value="45" aria-label="PPO game length seconds" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="Warmup" data-tooltip-body="Initial simulated seconds excluded from PPO rewards, policy updates, and batch stats. Example: 3 lets early enemy spawning settle before score, damage, kills, and death graphs start counting."><span>Warmup</span><input id="ppo-warmup" type="number" min="0" max="30" step="1" value="3" aria-label="PPO warmup seconds" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="Advantage Clamp" data-tooltip-body="Caps how strongly unusually good or bad moments affect the update. Example: 3 prevents one lucky run from dominating; 8 lets rare high-value events push harder."><span>Adv. Clamp</span><input id="ppo-adv-clamp" type="number" min="0.5" max="10" step="0.5" value="3" aria-label="Advantage clamp" /></div>
+              <label class="ppo-sidebar-row ppo-checkbox-row" data-tooltip-title="Drop Death Runs" data-tooltip-body="When enabled, episodes that ended in death still count in the visible batch stats and death graph, but their trajectories are excluded from the PPO policy update.">
+                <span>Drop Death Runs</span>
+                <input id="ppo-filter-deaths" type="checkbox" aria-label="Filter death episodes from PPO training" />
+              </label>
             </div>
             <div class="ppo-sidebar-section">
               <h3 class="ppo-sidebar-heading">Rewards</h3>
               <div class="ppo-sidebar-row" data-tooltip-title="Kill Reward" data-tooltip-body="Reward added when the agent kills an enemy. Example: 7.5 encourages aggressive routing toward enemies; 2 makes survival and pickups matter more."><span>Kill</span><input id="ppo-kill-reward" type="number" min="0" max="50" step="0.5" value="7.5" aria-label="Kill reward" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="XP Reward" data-tooltip-body="Reward per XP core gained before level-up conversion. Example: 0.08 makes collecting nearby cores worthwhile; 0.25 strongly prioritizes pickup routing."><span>XP</span><input id="ppo-xp-reward" type="number" min="0" max="5" step="0.01" value="0.08" aria-label="XP reward" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="Powerup Reward" data-tooltip-body="Reward when temporary pickups or shield/cache gains are collected. Example: 0.7 teaches the agent to detour for magnet, overdrive, shield, and cache pickups."><span>Powerups</span><input id="ppo-powerup-reward" type="number" min="0" max="20" step="0.1" value="0.7" aria-label="Powerup reward" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Damage Reward" data-tooltip-body="Reward per point of damage dealt to enemies. Example: 0.025 means dealing 100 damage adds 2.5 reward, encouraging the agent to keep shooting; 0.1 strongly prioritizes raw damage output over kills/pickups."><span>Damage</span><input id="ppo-damage-reward" type="number" min="0" max="2" step="0.005" value="0.025" aria-label="Damage reward" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="Damage Taken Penalty" data-tooltip-body="Penalty per hull damage taken. Example: 0.16 makes taking 10 damage cost 1.6 reward, pushing the policy away from collisions."><span>Dmg Taken</span><input id="ppo-dmg-taken" type="number" min="0" max="2" step="0.01" value="0.16" aria-label="Damage taken penalty" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="Survival Bonus" data-tooltip-body="Small reward added each simulation tick while alive. Example: 0.025 rewards staying alive even before kills happen, reducing reckless early deaths."><span>Survival</span><input id="ppo-survival-bonus" type="number" min="0" max="0.5" step="0.005" value="0.025" aria-label="Survival tick bonus" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Enemy HP Scale" data-tooltip-body="Global multiplier applied to every enemy's max HP and current HP at spawn during training. Example: 1.5 makes enemies 50% tankier; 0.5 halves their HP for faster kill loops."><span>Enemy HP &times;</span><input id="ppo-enemy-hp-mult" type="number" min="0.1" max="10" step="0.05" value="1" aria-label="Enemy health multiplier" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Enemy Speed Scale" data-tooltip-body="Global multiplier applied to every enemy's movement speed at spawn during training. Example: 1.25 makes pursuers harder to kite; 0.75 gives the agent more breathing room."><span>Enemy Speed &times;</span><input id="ppo-enemy-speed-mult" type="number" min="0.1" max="5" step="0.05" value="1" aria-label="Enemy speed multiplier" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Enemy Spawn Scale" data-tooltip-body="Global multiplier on how many enemies appear per spawn pack and the active enemy cap. Example: 2 doubles the pack size and active limit so the agent faces denser swarms; 0.5 thins them out."><span>Enemy Spawn &times;</span><input id="ppo-enemy-spawn-mult" type="number" min="0.1" max="10" step="0.05" value="1" aria-label="Enemy spawn multiplier" /></div>
+              <div class="ppo-sidebar-row" data-tooltip-title="Kill Streak (10s)" data-tooltip-body="Per-kill bonus that scales with how many kills the agent has scored in the last 10 seconds. Example: 0.5 means the 1st kill in a window adds 0.5, the 2nd adds 1.0, the 3rd adds 1.5, rewarding sustained aggression."><span>Kill Streak</span><input id="ppo-kill-streak-reward" type="number" min="0" max="20" step="0.05" value="0" aria-label="Kill streak reward (10 second window)" /></div>
               <div class="ppo-sidebar-row" data-tooltip-title="Death Penalty" data-tooltip-body="Final reward penalty when the episode ends in death. Example: 35 makes dying erase several kills worth of reward, so upgrade and movement choices value safety."><span>Death Penalty</span><input id="ppo-death-penalty" type="number" min="0" max="200" step="1" value="35" aria-label="Death penalty" /></div>
             </div>
           </aside>
@@ -171,6 +171,14 @@
                   <small>Trails, sparks, space dust, explosions</small>
                 </span>
                 <input id="option-particles" type="checkbox" />
+              </label>
+
+              <label class="option-row">
+                <span>
+                  <strong>Always launch, never suggest spending</strong>
+                  <small>Skip the spend prompt on the main menu</small>
+                </span>
+                <input id="option-always-launch" type="checkbox" />
               </label>
             </div>
 

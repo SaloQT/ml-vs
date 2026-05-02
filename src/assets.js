@@ -42,6 +42,23 @@ export const ENEMY_IMAGES = {
   enemyCharger: "./assets/enemy-sprites/charger.png",
   enemySiphon: "./assets/enemy-sprites/siphon.png",
   enemyWarden: "./assets/enemy-sprites/warden.png",
+  enemySplitter: "./assets/enemy-sprites/splitter.png",
+  enemySpitter: "./assets/enemy-sprites/spitter.png",
+  enemyBulwark: "./assets/enemy-sprites/bulwark.png",
+};
+
+export const BOSS_IMAGES = {
+  bossBroodSplitter: "./assets/enemy-sprites/boss-brood-splitter.png",
+  bossSiphonPrime: "./assets/enemy-sprites/boss-siphon-prime.png",
+  bossBastionBulwark: "./assets/enemy-sprites/boss-bastion-bulwark.png",
+  bossNovaSpitter: "./assets/enemy-sprites/boss-nova-spitter.png",
+};
+
+export const BOSS_PORTRAIT_IMAGES = {
+  portraitBroodSplitter: "./assets/enemy-sprites/portrait-brood-splitter.png",
+  portraitSiphonPrime: "./assets/enemy-sprites/portrait-siphon-prime.png",
+  portraitBastionBulwark: "./assets/enemy-sprites/portrait-bastion-bulwark.png",
+  portraitNovaSpitter: "./assets/enemy-sprites/portrait-nova-spitter.png",
 };
 
 export const UI_SHEET = {
@@ -71,8 +88,20 @@ export function loadEnemySheet() {
 }
 
 export function loadEnemyImageSet() {
+  return loadImageSet(ENEMY_IMAGES);
+}
+
+export function loadBossImageSet() {
+  return loadImageSet(BOSS_IMAGES);
+}
+
+export function loadBossPortraitImageSet() {
+  return loadImageSet(BOSS_PORTRAIT_IMAGES);
+}
+
+function loadImageSet(images) {
   return Object.fromEntries(
-    Object.entries(ENEMY_IMAGES).map(([name, src]) => {
+    Object.entries(images).map(([name, src]) => {
       const image = new Image();
       image.src = src;
       return [

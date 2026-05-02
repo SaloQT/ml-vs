@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 
 import { PLAYER_BASE } from "../src/config.js";
 import { createEnemy, createProjectile } from "../src/entities.js";
+import { asymptoticEffect } from "../src/metaProgression.js";
 import { GameSimulation } from "../src/simulation.js";
+
+function approxEq(a, b, eps = 1e-6) {
+  assert.ok(Math.abs(a - b) < eps, `expected ${a} ≈ ${b}`);
+}
 
 function deterministicSummary(simulation) {
   const snapshot = simulation.getSnapshot();
@@ -117,7 +122,7 @@ test("enemy contact damages the player without counting as a projectile kill", (
 
   simulation.updateEnemies(0);
 
-  assert.equal(player.hp, player.stats.maxHp - enemy.damage);
+  assert.equal(player.hp, player.stats.maxHp - Math.max(1, enemy.damage - (player.stats.armor ?? 0)));
   assert.equal(player.invulnerableFor, PLAYER_BASE.invulnerability);
   assert.equal(simulation.enemies.has(enemy.id), true);
   assert.equal(player.kills, 0);
@@ -172,12 +177,16 @@ test("meta progression and equipment are applied to starting player stats", () =
   });
   const player = simulation.players.get("p1");
 
-  assert.equal(player.stats.maxHp, PLAYER_BASE.maxHp + 2 * 8 + 28);
+  const hullBonus = asymptoticEffect(2, 80, 0.13863);
+  const damageBonus = asymptoticEffect(3, 0.60, 0.12344);
+  const fireRateBonus = asymptoticEffect(4, 0.40, 0.23368);
+  const speedBonus = asymptoticEffect(2, 0.25, 0.28443);
+  approxEq(player.stats.maxHp, PLAYER_BASE.maxHp + hullBonus + 28);
   assert.equal(player.hp, player.stats.maxHp);
   assert.equal(player.stats.armor, 3);
   assert.equal(player.stats.pickupRadius, PLAYER_BASE.pickupRadius);
   assert.equal(player.stats.critChance, 0.04 + 0.08);
-  assert.equal(player.stats.damage, 24 * (1 + 3 * 0.04) * 1.35);
-  assert.equal(player.stats.fireRate, (1 + 4 * 0.035) * 0.76);
-  assert.equal(player.stats.speed, PLAYER_BASE.speed * (1 + 2 * 0.025) * 0.92);
+  approxEq(player.stats.damage, 24 * (1 + damageBonus) * 1.35);
+  approxEq(player.stats.fireRate, (1 + fireRateBonus) * 0.76);
+  approxEq(player.stats.speed, PLAYER_BASE.speed * (1 + speedBonus) * 0.92);
 });
