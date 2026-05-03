@@ -1549,9 +1549,10 @@ body {
   padding-left: 18px;
   display: grid;
   align-content: start;
-  gap: 3px;
+  gap: 2px;
   color: #c8d7e6;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
+  line-height: 1.22;
 }
 .armory-equipment-effects li::marker { color: var(--cyan); }
 .armory-equipment-deltas {
