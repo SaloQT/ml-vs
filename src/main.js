@@ -204,7 +204,9 @@ ppoWatchFile.addEventListener("change", async () => {
 
 openArmory.addEventListener("click", () => {
   openPanel(armoryPanel, openArmory);
-  document.querySelector("#close-armory")?.focus();
+  const armoryRoot = document.querySelector("#armory-root");
+  armoryRoot?.scrollTo?.(0, 0);
+  armoryRoot?.focus?.({ preventScroll: true });
 });
 openOptions.addEventListener("click", () => {
   optionsPanel.classList.remove("hidden");
@@ -536,7 +538,8 @@ function openPanel(panel, focusTarget) {
   panel.classList.remove("hidden");
   panel.scrollTop = 0;
   panel.querySelector(".armory-layout")?.scrollTo?.(0, 0);
-  focusTarget.focus();
+  panel.querySelector("#armory-root")?.scrollTo?.(0, 0);
+  focusTarget.focus({ preventScroll: true });
 }
 
 function closePanel(panel, focusTarget) {
@@ -792,18 +795,12 @@ function renderArmory() {
   const featuredId = featuredUpgradeIdForDate(new Date());
   const featuredUpgrade = PERMANENT_UPGRADES.find((u) => u.id === featuredId);
 
-  root.replaceChildren();
-  root.append(
-    renderArmoryHeader(featuredUpgrade),
-    renderArmoryHangar(),
-    renderArmoryBody(featuredId),
-    renderArmoryEquipmentBay(),
-    renderArmoryFooter(),
-  );
-
+  const sections = [renderArmoryHeader(featuredUpgrade)];
   if (shouldShowEmptyState()) {
-    root.append(renderArmoryEmptyState());
+    sections.push(renderArmoryEmptyState());
   }
+  sections.push(renderArmoryHangar(), renderArmoryBody(featuredId), renderArmoryEquipmentBay(), renderArmoryFooter());
+  root.replaceChildren(...sections);
 }
 
 function shouldShowEmptyState() {
@@ -1257,26 +1254,23 @@ function renderArmoryFooter() {
 }
 
 function renderArmoryEmptyState() {
-  const overlay = document.createElement("div");
-  overlay.className = "armory-empty-overlay";
+  const banner = document.createElement("section");
+  banner.className = "armory-zone armory-empty-banner";
   const reinforced = PERMANENT_UPGRADES.find((u) => u.id === "reinforced-hull");
   const cost = nextRankCost(reinforced, 0);
-  overlay.innerHTML = `
-    <div class="armory-empty-card">
-      <h3>Get Started</h3>
-      <ol>
-        <li>Survive a run → earn Scrap</li>
-        <li>Spend Scrap on Permanent Systems (start with Reinforced Hull, ${cost})</li>
-        <li>Swap Equipment in the Hangar to change how you fight</li>
-      </ol>
-      <button id="armory-launch-first" type="button" class="armory-cta">Launch First Run</button>
+  banner.innerHTML = `
+    <div>
+      <span class="armory-eyebrow">First run</span>
+      <strong>Launch, earn scrap, then start with Reinforced Hull.</strong>
+      <small>Equipment swaps are available now. Permanent systems unlock after your first salvage payout. Reinforced Hull starts at ${cost} scrap.</small>
     </div>
+    <button id="armory-launch-first" type="button" class="armory-cta">Launch First Run</button>
   `;
-  overlay.querySelector("#armory-launch-first").addEventListener("click", () => {
+  banner.querySelector("#armory-launch-first").addEventListener("click", () => {
     closePanel(armoryPanel, openArmory);
     startRun.click();
   });
-  return overlay;
+  return banner;
 }
 function renderPpoPanel() {
   const last = ppoTrainer.history.at(-1) ?? {
