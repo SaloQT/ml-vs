@@ -1157,12 +1157,22 @@ function renderArmoryEquipmentBay() {
       <span class="equipment-sprite equipment-sprite-${item.icon ?? item.id}" aria-hidden="true"></span>
       <small>${item.name}</small>
     `;
+    thumb.title = unlocked
+      ? item.id === currentItem.id
+        ? `${item.name} is equipped`
+        : `Equip ${item.name}`
+      : `${item.name} is locked`;
     thumb.addEventListener("mouseenter", () => {
+      if (armoryUiState.hoverItemId[slot] === item.id) return;
       armoryUiState.hoverItemId[slot] = item.id;
       renderArmory();
     });
     thumb.addEventListener("click", () => {
       armoryUiState.hoverItemId[slot] = item.id;
+      if (unlocked && item.id !== currentItem.id) {
+        metaProgress.equipment[slot] = item.id;
+        saveMetaProgress();
+      }
       renderArmory();
     });
     strip.append(thumb);
@@ -1191,11 +1201,9 @@ function renderEquipmentCompareCard(slot, item, label, isCurrent, sameAsCurrent 
       ? `<p>${item.description}</p><ul class="armory-equipment-effects">${item.effects.map((e) => `<li>${e}</li>`).join("")}</ul>`
       : `<p>Max 3 systems to unlock ${item.name}.</p>`
     }
-    ${isCurrent
+    ${isCurrent || sameAsCurrent
       ? `<button class="armory-card-buy" type="button" disabled>Equipped</button>`
-      : sameAsCurrent
-        ? ""
-        : `<button class="armory-card-buy" type="button" ${unlocked ? "" : "disabled"}>${unlocked ? "Equip" : "Locked"}</button>`
+      : `<button class="armory-card-buy" type="button" ${unlocked ? "" : "disabled"}>${unlocked ? "Equip" : "Locked"}</button>`
     }
   `;
   const equipBtn = card.querySelector(".armory-card-buy:not([disabled])");
