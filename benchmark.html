@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Space Survivors — Algorithm Benchmark</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #06080f;
+        --panel: #0d1422;
+        --border: #1c2740;
+        --text: #d8e3ff;
+        --muted: #7c8aab;
+        --ppo: #64d9ff;
+        --reinforce: #ffca3a;
+        --a2c: #8ce99a;
+        --dqn: #ff7eb6;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      header {
+        padding: 18px 24px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      header h1 { font-size: 18px; margin: 0; letter-spacing: 0.5px; }
+      header p { margin: 0; color: var(--muted); font-size: 13px; }
+      .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      button, label.field {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--border);
+        padding: 8px 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button:hover { border-color: #2c3e6b; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      label.field { cursor: default; display: inline-flex; gap: 6px; align-items: center; }
+      label.field input {
+        background: transparent; color: var(--text);
+        border: none; outline: none; width: 50px; font-size: 13px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+        gap: 16px;
+        padding: 16px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px;
+      }
+      .card-head {
+        display: flex; justify-content: space-between; align-items: baseline;
+        margin-bottom: 10px;
+      }
+      .card-head h2 { margin: 0; font-size: 15px; }
+      .card-head .badge { font-size: 11px; color: var(--muted); }
+      .swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align: middle; }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 8px;
+      }
+      .stats div strong { color: var(--text); display: block; font-size: 14px; }
+      canvas.chart { width: 100%; height: 160px; display: block; background: #07101e; border-radius: 4px; }
+      #combined { padding: 0 16px 24px; }
+      #combined .card { padding: 16px; }
+      #combined canvas { height: 280px; }
+      .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+      .log {
+        margin: 0 16px 16px;
+        max-height: 160px;
+        overflow-y: auto;
+        font-family: ui-monospace, monospace;
+        font-size: 11px;
+        background: #07101e;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px;
+        color: var(--muted);
+      }
+      .log .line.ppo { color: var(--ppo); }
+      .log .line.reinforce { color: var(--reinforce); }
+      .log .line.a2c { color: var(--a2c); }
+      .log .line.dqn { color: var(--dqn); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Algorithm Benchmark</h1>
+        <p>Train PPO · REINFORCE · A2C · DQN concurrently and compare reward curves.</p>
+      </div>
+      <div class="controls">
+        <label class="field">iters <input id="iters" type="number" value="40" min="1" max="500"></label>
+        <label class="field">batch <input id="batch" type="number" value="2" min="1" max="8"></label>
+        <button id="start">Start</button>
+        <button id="stop" disabled>Stop</button>
+        <button id="reset">Reset</button>
+      </div>
+    </header>
+
+    <section id="combined">
+      <div class="card">
+        <div class="card-head">
+          <h2>Reward over Iterations</h2>
+          <div class="badge" id="combined-status">idle</div>
+        </div>
+        <canvas id="combined-chart" class="chart"></canvas>
+        <div class="legend">
+          <span><span class="swatch" style="background:var(--ppo)"></span>PPO</span>
+          <span><span class="swatch" style="background:var(--reinforce)"></span>REINFORCE</span>
+          <span><span class="swatch" style="background:var(--a2c)"></span>A2C</span>
+          <span><span class="swatch" style="background:var(--dqn)"></span>DQN</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid" id="cards"></section>
+
+    <pre class="log" id="log"></pre>
+
+    <script type="module">
+      import { PpoTrainer } from "./src/ppoTrainer.js";
+      import { ReinforceTrainer } from "./src/reinforceTrainer.js";
+      import { A2cTrainer } from "./src/a2cTrainer.js";
+      import { DqnTrainer } from "./src/dqnTrainer.js";
+
+      const ALGOS = [
+        { key: "ppo", name: "PPO", color: getCss("--ppo"), Trainer: PpoTrainer },
+        { key: "reinforce", name: "REINFORCE", color: getCss("--reinforce"), Trainer: ReinforceTrainer },
+        { key: "a2c", name: "A2C", color: getCss("--a2c"), Trainer: A2cTrainer },
+        { key: "dqn", name: "DQN", color: getCss("--dqn"), Trainer: DqnTrainer },
+      ];
+
+      function getCss(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      }
+
+      const cardsEl = document.getElementById("cards");
+      const logEl = document.getElementById("log");
+      const combinedCanvas = document.getElementById("combined-chart");
+      const combinedStatus = document.getElementById("combined-status");
+      const startBtn = document.getElementById("start");
+      const stopBtn = document.getElementById("stop");
+      const resetBtn = document.getElementById("reset");
+      const itersInput = document.getElementById("iters");
+      const batchInput = document.getElementById("batch");
+
+      const state = ALGOS.map((a) => ({
+        ...a,
+        trainer: new a.Trainer(),
+        history: [],
+        last: null,
+        canvas: null,
+        statsEl: null,
+        running: false,
+      }));
+
+      for (const s of state) buildCard(s);
+
+      function buildCard(s) {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <div class="card-head">
+            <h2><span class="swatch" style="background:${s.color}"></span>${s.name}</h2>
+            <div class="badge" id="badge-${s.key}">idle</div>
+          </div>
+          <canvas class="chart" id="chart-${s.key}"></canvas>
+          <div class="stats" id="stats-${s.key}">
+            <div>iter<strong>0</strong></div>
+            <div>reward<strong>—</strong></div>
+            <div>kills<strong>—</strong></div>
+            <div>tps<strong>—</strong></div>
+          </div>
+        `;
+        cardsEl.appendChild(card);
+        s.canvas = card.querySelector("canvas");
+        s.badge = card.querySelector(`#badge-${s.key}`);
+        s.statsEl = card.querySelector(`#stats-${s.key}`);
+      }
+
+      function setupCanvas(canvas) {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { ctx, w: rect.width, h: rect.height };
+      }
+
+      function drawChart(canvas, series) {
+        const { ctx, w, h } = setupCanvas(canvas);
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = "#07101e";
+        ctx.fillRect(0, 0, w, h);
+        const all = series.flatMap((s) => s.points.map((p) => p.y));
+        if (all.length === 0) {
+          ctx.fillStyle = "#7c8aab";
+          ctx.font = "12px ui-sans-serif";
+          ctx.fillText("waiting…", 10, 20);
+          return;
+        }
+        const minY = Math.min(...all, 0);
+        const maxY = Math.max(...all, 1);
+        const maxX = Math.max(...series.map((s) => s.points.length), 2);
+        const pad = 24;
+        const plotW = w - pad * 2;
+        const plotH = h - pad * 2;
+
+        ctx.strokeStyle = "#1c2740";
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i += 1) {
+          const y = pad + (plotH / 4) * i;
+          ctx.beginPath();
+          ctx.moveTo(pad, y);
+          ctx.lineTo(w - pad, y);
+          ctx.stroke();
+        }
+        ctx.fillStyle = "#7c8aab";
+        ctx.font = "10px ui-monospace, monospace";
+        ctx.fillText(maxY.toFixed(0), 2, pad + 4);
+        ctx.fillText(minY.toFixed(0), 2, h - pad + 4);
+
+        for (const s of series) {
+          if (s.points.length < 1) continue;
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          for (let i = 0; i < s.points.length; i += 1) {
+            const p = s.points[i];
+            const x = pad + (plotW * (i / Math.max(1, maxX - 1)));
+            const y = pad + plotH - ((p.y - minY) / Math.max(0.0001, maxY - minY)) * plotH;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+      }
+
+      function redrawAll() {
+        for (const s of state) {
+          drawChart(s.canvas, [{ color: s.color, points: s.history.map((p, i) => ({ x: i, y: p.reward })) }]);
+        }
+        drawChart(
+          combinedCanvas,
+          state.map((s) => ({ color: s.color, points: s.history.map((p, i) => ({ x: i, y: p.reward })) })),
+        );
+      }
+
+      function updateStats(s) {
+        if (!s.last) return;
+        const p = s.last;
+        s.statsEl.innerHTML = `
+          <div>iter<strong>${p.iteration}</strong></div>
+          <div>reward<strong>${p.reward}</strong></div>
+          <div>kills<strong>${p.kills ?? "—"}</strong></div>
+          <div>tps<strong>${p.ticksPerSecond ?? "—"}</strong></div>
+        `;
+      }
+
+      function log(key, msg) {
+        const line = document.createElement("div");
+        line.className = `line ${key}`;
+        line.textContent = msg;
+        logEl.appendChild(line);
+        logEl.scrollTop = logEl.scrollHeight;
+        while (logEl.childElementCount > 400) logEl.removeChild(logEl.firstChild);
+      }
+
+      let runToken = 0;
+
+      async function start() {
+        const iters = Math.max(1, parseInt(itersInput.value, 10) || 40);
+        const batch = Math.max(1, parseInt(batchInput.value, 10) || 2);
+        runToken += 1;
+        const myToken = runToken;
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        combinedStatus.textContent = `running · ${iters} iters × ${batch}`;
+
+        const tasks = state.map((s) => runAlgo(s, iters, batch, myToken));
+        await Promise.all(tasks);
+
+        if (myToken === runToken) {
+          combinedStatus.textContent = "done";
+          startBtn.disabled = false;
+          stopBtn.disabled = true;
+        }
+      }
+
+      async function runAlgo(s, iters, batch, myToken) {
+        s.running = true;
+        s.badge.textContent = "running";
+        for (let i = 0; i < iters; i += 1) {
+          if (myToken !== runToken) break;
+          const point = await new Promise((resolve) => {
+            // Yield to the event loop so all four interleave instead of starving the UI.
+            setTimeout(() => {
+              try { resolve(s.trainer.trainBatch(batch)); }
+              catch (err) { resolve({ error: err.message }); }
+            }, 0);
+          });
+          if (point.error) {
+            log(s.key, `[${s.name}] ERROR ${point.error}`);
+            break;
+          }
+          s.history.push(point);
+          s.last = point;
+          if (i % 2 === 0 || i === iters - 1) {
+            updateStats(s);
+            redrawAll();
+          }
+          if (i % 5 === 0 || i === iters - 1) {
+            log(s.key, `[${s.name}] iter=${point.iteration} reward=${point.reward} kills=${point.kills} surv=${point.seconds}s death=${point.deathRate}%`);
+          }
+        }
+        s.running = false;
+        s.badge.textContent = "idle";
+        updateStats(s);
+        redrawAll();
+      }
+
+      function stop() {
+        runToken += 1;
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        combinedStatus.textContent = "stopped";
+        for (const s of state) s.badge.textContent = "stopped";
+      }
+
+      function reset() {
+        runToken += 1;
+        for (const s of state) {
+          s.trainer = new s.Trainer();
+          s.history = [];
+          s.last = null;
+          s.badge.textContent = "idle";
+          s.statsEl.innerHTML = `
+            <div>iter<strong>0</strong></div>
+            <div>reward<strong>—</strong></div>
+            <div>kills<strong>—</strong></div>
+            <div>tps<strong>—</strong></div>
+          `;
+        }
+        logEl.innerHTML = "";
+        combinedStatus.textContent = "idle";
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        redrawAll();
+      }
+
+      startBtn.addEventListener("click", start);
+      stopBtn.addEventListener("click", stop);
+      resetBtn.addEventListener("click", reset);
+      window.addEventListener("resize", redrawAll);
+      redrawAll();
+    </script>
+  </body>
+</html>
