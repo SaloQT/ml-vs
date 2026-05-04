@@ -9,6 +9,7 @@
     "ppo:train": "node scripts/ppo-train.mjs",
     "reinforce:train": "node scripts/reinforce-train.mjs",
     "a2c:train": "node scripts/a2c-train.mjs",
-    "dqn:train": "node scripts/dqn-train.mjs"
+    "dqn:train": "node scripts/dqn-train.mjs",
+    "benchmark:all": "node scripts/benchmark-all.mjs"
   }
 }
