@@ -1008,7 +1008,9 @@ export class Renderer {
         }
       }
     }
-    this.seenEffects = new Set([...this.seenEffects].filter((id) => activeIds.has(id)));
+    for (const id of this.seenEffects) {
+      if (!activeIds.has(id)) this.seenEffects.delete(id);
+    }
   }
 
   addDamageFeedback(effect, elapsed, destroyed) {
