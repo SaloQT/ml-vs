@@ -413,7 +413,7 @@ export class PpoTrainer {
       // unboundedly (one entry per batch); the metric points are only used
       // for charting/observation, not for training, so dropping the oldest
       // entries past the window is observationally invisible.
-      if (this.history.length > 500) this.history.splice(0, this.history.length - 500);
+      if (this.history.length > 5000) this.history.splice(0, this.history.length - 5000);
       return point;
     };
     if (this.useOrt) {

@@ -151,7 +151,10 @@ if (typeof window !== "undefined") {
       const h = trainer.history ?? [];
       const last = h.at(-1) ?? null;
       out[key] = {
-        iterations: h.length,
+        // True iteration count — h.length is bounded by the rolling history
+        // cap, so it freezes once the cap is reached even though training
+        // continues. Use the last point's iteration field instead.
+        iterations: last?.iteration ?? 0,
         ticksPerSecond: last?.ticksPerSecond ?? null,
         elapsedMs: last?.elapsedMs ?? null,
         ticksLast: last?.ticks ?? null,
