@@ -1837,7 +1837,13 @@ export class GameSimulation {
 
   nearestChainTargets(sourceEnemy, excludedIds, range, count) {
     const targets = [];
-    const blocked = new Set(excludedIds);
+    // Reuse a scratch Set across calls instead of allocating per chain step.
+    // Safe because this method and nearestChainTargetOnce never recurse, so
+    // the scratch is fully consumed before any other caller can claim it.
+    let blocked = this._chainBlockedScratch;
+    if (!blocked) blocked = this._chainBlockedScratch = new Set();
+    else blocked.clear();
+    if (excludedIds) for (const id of excludedIds) blocked.add(id);
     while (targets.length < count) {
       const target = this.nearestChainTargetOnce(sourceEnemy, blocked, range);
       if (!target) break;

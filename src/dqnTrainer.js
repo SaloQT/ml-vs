@@ -421,6 +421,7 @@ export class DqnTrainer {
         tdLoss: Number(tdLoss.toFixed(6)),
       };
       this.history.push(point);
+      if (this.history.length > 500) this.history.splice(0, this.history.length - 500);
       return point;
     };
     if (this.useOrt) {

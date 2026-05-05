@@ -136,6 +136,7 @@ export class ReinforceTrainer {
       elapsedMs,
     };
     this.history.push(point);
+    if (this.history.length > 500) this.history.splice(0, this.history.length - 500);
     return point;
   }
 

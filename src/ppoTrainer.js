@@ -409,6 +409,11 @@ export class PpoTrainer {
         elapsedMs: Math.round(elapsedMs),
       };
       this.history.push(point);
+      // Cap to a rolling window. Long training sessions otherwise grow this
+      // unboundedly (one entry per batch); the metric points are only used
+      // for charting/observation, not for training, so dropping the oldest
+      // entries past the window is observationally invisible.
+      if (this.history.length > 500) this.history.splice(0, this.history.length - 500);
       return point;
     };
     if (this.useOrt) {
