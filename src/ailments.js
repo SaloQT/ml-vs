@@ -133,6 +133,7 @@ const HARD_DISABLE_AILMENTS = new Set(["freeze"]);
 // Order MUST match insertion order in AILMENT_CONFIG so RNG-driven rolls
 // remain deterministic across versions.
 const AILMENT_NAMES = ["bleed", "poison", "ignite", "chill", "freeze", "shock", "scorch", "brittle", "sap"];
+const BLEED_MOVING_BONUS = AILMENT_CONFIG.bleed.movingBonus ?? 1;
 
 export function emptyAilmentState() {
   return {};
@@ -322,8 +323,7 @@ function tickStack(simulation, enemy, name, stack, dt) {
       let tickDamage = stack.dotPerSecond * tickRate;
       // Bleed ramps up if enemy is moving.
       if (name === "bleed" && (enemy.speed ?? 0) > 0) {
-        const cfg = AILMENT_CONFIG.bleed;
-        tickDamage *= cfg.movingBonus ?? 1;
+        tickDamage *= BLEED_MOVING_BONUS;
       }
       simulation.damageEnemy(enemy, tickDamage, {
         ownerId: stack.ownerId,
