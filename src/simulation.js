@@ -7,11 +7,9 @@ import { pickUpgradeChoices, UPGRADE_POOL } from "./upgrades.js";
 import {
   applyAilmentsFromHit,
   updateAilments,
-  getAilmentSpeedMultiplier,
   getAilmentDamageTakenMultiplier,
   getAilmentOutgoingDamageMultiplier,
   getAilmentCritChanceBonus,
-  isFrozen,
 } from "./ailments.js";
 
 const ELITE_ROTATION = [
@@ -85,6 +83,13 @@ const BOSS_ROTATION = [
 ];
 
 const BOSS_SPAWN_TELEGRAPH_DURATION = 2.5;
+
+// Sort comparator used by spatial-grid call sites that need to iterate
+// candidates in the same order as Map.values() (i.e. ascending insertion
+// id). _numericId is populated in _rebuildEnemyGrid / _addEnemyToGrid.
+function byNumericIdAsc(a, b) {
+  return a._numericId - b._numericId;
+}
 
 export class GameSimulation {
   constructor({ seed = Date.now(), localPlayerId = "p1", targeting = {}, metaProgress = {}, headless = false, enableRunEvents = undefined, enemyHealthMultiplier = 1, enemySpeedMultiplier = 1, enemySpawnMultiplier = 1, runMode = "normal" } = {}) {
@@ -170,6 +175,13 @@ export class GameSimulation {
     this.updateRunEvents(dt);
     this.updatePlayers(dt);
     this.updateSpawning(dt);
+    // Spatial grid is rebuilt once per frame after spawning. updateEnemies,
+    // updateProjectiles and updateDrones all use it for radius queries
+    // instead of scanning this.enemies.values() — a meaningful CPU win at
+    // 290+ enemies. Enemies spawned mid-step (split children, boss minions)
+    // are inserted into the live grid by _addEnemyToGrid so subsequent
+    // queries still find them.
+    this._rebuildEnemyGrid();
     this.updateEnemies(dt);
     this.updateProjectiles(dt);
     this.updateDrones(dt);
@@ -247,11 +259,22 @@ export class GameSimulation {
       }
     }
 
-    for (const event of this.runEvents.active) {
+    const active = this.runEvents.active;
+    for (let i = 0; i < active.length; i += 1) {
+      const event = active[i];
       if (event.type === RUN_EVENTS.laneSweep.id) this.updateLaneSweep(event);
       if (event.type === RUN_EVENTS.rewardCache.id) this.updateRewardCache(event);
     }
-    this.runEvents.active = this.runEvents.active.filter((event) => this.elapsed < event.endAt);
+    // In-place compaction of expired events. Avoids the per-frame
+    // .filter() allocation when the active list is small but non-empty.
+    let writeIdx = 0;
+    for (let i = 0; i < active.length; i += 1) {
+      if (this.elapsed < active[i].endAt) {
+        if (writeIdx !== i) active[writeIdx] = active[i];
+        writeIdx += 1;
+      }
+    }
+    if (writeIdx !== active.length) active.length = writeIdx;
   }
 
   startRunEvent() {
@@ -766,7 +789,10 @@ export class GameSimulation {
       if ((enemy.regenPerSecond ?? 0) > 0 && enemy.hp > 0) {
         enemy.hp = Math.min(enemy.maxHp, enemy.hp + enemy.regenPerSecond * dt);
       }
-      this.updateEnemyPhase(enemy, target, dt);
+      // updateEnemyPhase early-returns for non-bosses; gate the call so we
+      // skip the function-invocation cost for the ~99% of enemies that
+      // aren't bosses.
+      if (enemy.rank === "boss") this.updateEnemyPhase(enemy, target, dt);
       const tdx = target.x - enemy.x;
       const tdy = target.y - enemy.y;
       const tlen = Math.sqrt(tdx * tdx + tdy * tdy);
@@ -830,8 +856,19 @@ export class GameSimulation {
         speedMultiplier = 0.55;
       }
       if (enemy.type === "warden" && tlen < (enemy.rank === "elite" ? 310 : 260)) speedMultiplier = 0.74;
-      speedMultiplier *= getAilmentSpeedMultiplier(enemy);
-      if (isFrozen(enemy)) speedMultiplier = 0;
+      // Inlined getAilmentSpeedMultiplier + isFrozen. The original isFrozen
+      // call was redundant with the freeze branch already returning 0.
+      // The _hasActiveAilments fast path skips the property reads entirely
+      // for the bulk of enemies that never get chilled or frozen.
+      if (enemy._hasActiveAilments) {
+        const ail = enemy.ailments;
+        if (ail.freeze && ail.freeze.remaining > 0) {
+          speedMultiplier = 0;
+        } else if (ail.chill) {
+          const chillMag = ail.chill.magnitude;
+          if (chillMag) speedMultiplier *= 1 - chillMag;
+        }
+      }
       const moveScale = enemy.speed * speedMultiplier * dt;
       enemy.x += dirX * moveScale + enemy.hitVx * dt;
       enemy.y += dirY * moveScale + enemy.hitVy * dt;
@@ -919,6 +956,7 @@ export class GameSimulation {
     minion.hitVy = direction.y * 70;
     this.applyEnemyScaling(minion);
     this.enemies.set(minion.id, minion);
+    this._addEnemyToGrid(minion);
   }
 
   enemyMoveDirection(enemy, target, dt) {
@@ -932,6 +970,11 @@ export class GameSimulation {
   }
 
   updateProjectiles(dt) {
+    // Query radius is generous: projectile + worst-case enemy radius. Boss
+    // radius peaks around 45 with the +radiusBonus pool; 50 is the headroom.
+    // Per-candidate exact collision (pr + enemy.radius) still gates impact.
+    const PROJECTILE_QUERY_PAD = 50;
+    const out = this._projectileCollisionScratch ?? (this._projectileCollisionScratch = []);
     for (const projectile of this.projectiles.values()) {
       this.accelerateProjectile(projectile, dt);
       projectile.x += projectile.vx * dt;
@@ -947,41 +990,69 @@ export class GameSimulation {
       const pr = projectile.radius;
       const hitIds = projectile.hitEnemyIds;
       const hitIdsLen = hitIds ? hitIds.length : 0;
-      for (const enemy of this.enemies.values()) {
+      this._queryEnemiesInRadius(px, py, pr + PROJECTILE_QUERY_PAD, out);
+      // Find the lowest-numericId candidate in collision. Mirrors the
+      // original Map-iteration order which yielded the smallest-insertion-
+      // id collision first.
+      let hit = null;
+      let hitNumericId = Infinity;
+      for (let i = 0; i < out.length; i += 1) {
+        const enemy = out[i];
         if (hitIdsLen > 0 && hitIds.indexOf(enemy.id) >= 0) continue;
+        const nid = enemy._numericId;
+        if (nid >= hitNumericId) continue;
         const hitDistance = pr + enemy.radius;
         const dx = px - enemy.x;
         const dy = py - enemy.y;
         if (dx * dx + dy * dy <= hitDistance * hitDistance) {
-          if (hitIds) hitIds.push(enemy.id);
-          this.applyBrittleCrit(projectile, enemy);
-          this.damageEnemy(enemy, projectile.damage, projectile);
-          this.applyProjectileStatuses(projectile, enemy);
-          this.splashProjectileDamage(projectile, enemy);
-          this.chainProjectileDamage(projectile, enemy);
-          this.tempestCoilChainDamage(projectile, enemy);
-          this.droneRelayDamage(projectile, enemy);
-          if (this.ricochetProjectile(projectile, enemy)) break;
-          if (projectile.pierce > 0) {
-            projectile.pierce -= 1;
-          } else {
-            this.projectiles.delete(projectile.id);
-          }
-          break;
+          hit = enemy;
+          hitNumericId = nid;
+        }
+      }
+      if (hit) {
+        const enemy = hit;
+        if (hitIds) hitIds.push(enemy.id);
+        this.applyBrittleCrit(projectile, enemy);
+        this.damageEnemy(enemy, projectile.damage, projectile);
+        this.applyProjectileStatuses(projectile, enemy);
+        this.splashProjectileDamage(projectile, enemy);
+        this.chainProjectileDamage(projectile, enemy);
+        this.tempestCoilChainDamage(projectile, enemy);
+        this.droneRelayDamage(projectile, enemy);
+        if (this.ricochetProjectile(projectile, enemy)) continue;
+        if (projectile.pierce > 0) {
+          projectile.pierce -= 1;
+        } else {
+          this.projectiles.delete(projectile.id);
         }
       }
     }
   }
 
   updateDrones(dt) {
+    // Drone radius is 20 + enemy.radius (peaks ~50 for bosses). 70 covers
+    // every plausible candidate; the inner loop still does the per-enemy
+    // exact (radius+20) check.
+    const DRONE_QUERY_PAD = 70;
+    const out = this._droneScratch ?? (this._droneScratch = []);
     for (const player of this.players.values()) {
-      for (let i = 0; i < player.stats.drones; i += 1) {
-        const angle = this.elapsed * (2.2 + i * 0.22) + (Math.PI * 2 * i) / player.stats.drones;
+      const droneCount = player.stats.drones;
+      if (!droneCount) continue;
+      const damagePerHit = (24 + player.stats.damage * 0.4) * dt;
+      for (let i = 0; i < droneCount; i += 1) {
+        const angle = this.elapsed * (2.2 + i * 0.22) + (Math.PI * 2 * i) / droneCount;
         const droneX = player.x + Math.cos(angle) * 78;
         const droneY = player.y + Math.sin(angle) * 78;
-        for (const enemy of this.enemies.values()) {
-          if (distanceSq(droneX, droneY, enemy.x, enemy.y) < (enemy.radius + 20) ** 2) {
-            this.damageEnemy(enemy, (24 + player.stats.damage * 0.4) * dt, {
+        this._queryEnemiesInRadius(droneX, droneY, DRONE_QUERY_PAD, out);
+        if (out.length > 1) out.sort(byNumericIdAsc);
+        for (let j = 0; j < out.length; j += 1) {
+          const enemy = out[j];
+          if (enemy.hp <= 0 || !this.enemies.has(enemy.id)) continue;
+          const dx = droneX - enemy.x;
+          const dy = droneY - enemy.y;
+          const reach = enemy.radius + 20;
+          if (dx * dx + dy * dy < reach * reach) {
+            this.damageEnemy(enemy, damagePerHit, {
               x: droneX,
               y: droneY,
               vx: enemy.x - droneX,
@@ -996,14 +1067,33 @@ export class GameSimulation {
   updatePickups(dt) {
     const pickupList = this.pickups;
     if (!pickupList.size) return;
-    const toCollect = [];
+    // Hoist pickupMagnetRadius and the collect-distance base out of the
+    // pickup × player inner loop. With one player and many pickups this turns
+    // an N×P set of redundant computations into one per player per frame.
+    // The cache array is reused across frames to avoid per-frame allocation.
+    let cache = this._pickupPlayerCache;
+    if (!cache) cache = this._pickupPlayerCache = [];
+    let count = 0;
+    for (const player of this.players.values()) {
+      const magnetRadius = this.pickupMagnetRadius(player);
+      let entry = cache[count];
+      if (!entry) entry = cache[count] = { player: null, magnetRadius: 0, magnetSq: 0, collectBase: 0 };
+      entry.player = player;
+      entry.magnetRadius = magnetRadius;
+      entry.magnetSq = magnetRadius * magnetRadius;
+      entry.collectBase = player.radius + player.stats.pickupRadius * 0.55;
+      count += 1;
+    }
+    let toCollect = null;
     for (const pickup of pickupList.values()) {
-      for (const player of this.players.values()) {
-        const magnetRadius = this.pickupMagnetRadius(player);
+      for (let i = 0; i < count; i += 1) {
+        const entry = cache[i];
+        const player = entry.player;
+        const magnetRadius = entry.magnetRadius;
+        const magnetSq = entry.magnetSq;
         const dx0 = player.x - pickup.x;
         const dy0 = player.y - pickup.y;
         const distSq = dx0 * dx0 + dy0 * dy0;
-        const magnetSq = magnetRadius * magnetRadius;
         if (distSq < magnetSq) {
           const len = Math.sqrt(distSq);
           if (len) {
@@ -1013,23 +1103,26 @@ export class GameSimulation {
             pickup.y += dy0 * scale;
           }
         }
-
-        const collectDistance = player.radius + player.stats.pickupRadius * 0.55 + pickup.radius;
+        const collectDistance = entry.collectBase + pickup.radius;
         const ndx = player.x - pickup.x;
         const ndy = player.y - pickup.y;
         if (ndx * ndx + ndy * ndy <= collectDistance * collectDistance) {
+          if (!toCollect) toCollect = [];
           toCollect.push({ pickup, player });
           break;
         }
       }
     }
-    for (let i = 0; i < toCollect.length; i += 1) {
-      const { pickup, player } = toCollect[i];
-      if (!pickupList.has(pickup.id)) continue;
-      pickupList.delete(pickup.id);
-      this.markRewardCacheCollected(pickup);
-      this.collectPickup(player, pickup);
+    if (toCollect) {
+      for (let i = 0; i < toCollect.length; i += 1) {
+        const { pickup, player } = toCollect[i];
+        if (!pickupList.has(pickup.id)) continue;
+        pickupList.delete(pickup.id);
+        this.markRewardCacheCollected(pickup);
+        this.collectPickup(player, pickup);
+      }
     }
+    for (let i = 0; i < count; i += 1) cache[i].player = null;
   }
 
   markRewardCacheCollected(pickup) {
@@ -1147,23 +1240,167 @@ export class GameSimulation {
     this.pickups.set(pickup.id, pickup);
   }
 
+  // ---- Spatial grid -------------------------------------------------------
+  // Cell size 128 — large enough that the 240-unit gravity burst still
+  // touches only ~5x5 cells, small enough that 70-unit bursts only
+  // touch ~3x3 cells. 128 is a power of two so cell coords are an
+  // arithmetic right shift.
+  //
+  // Cell key = cy * GRID_STRIDE + cx, where cx/cy are non-negative cell
+  // indices computed from a positive-shifted world position. Using an
+  // OFFSET large enough to keep `value + OFFSET` non-negative for any
+  // simulation position lets us use `(value + OFFSET) | 0` instead of
+  // Math.floor — `| 0` truncates toward zero, which matches floor for
+  // non-negative values. This shaves the floor call out of the inner loop.
+  // OFFSET=8192 covers the cleanup horizon (~1800) with plenty of slack.
+  // Flat array of buckets indexed by cell key. Faster than a Map at the
+  // 290-enemy scale: no hash overhead in the hot insert/get path. The
+  // _gridOccupiedKeys list lets us clear only the buckets that were used,
+  // avoiding a 65536-entry sweep each frame.
+  _ensureGridStorage() {
+    if (this._gridBuckets) return;
+    this._gridBuckets = new Array(65536);
+    this._gridBucketPool = [];
+    this._gridOccupiedKeys = [];
+  }
+
+  _resetEnemyGrid() {
+    const buckets = this._gridBuckets;
+    const pool = this._gridBucketPool;
+    const occupied = this._gridOccupiedKeys;
+    for (let i = 0; i < occupied.length; i += 1) {
+      const key = occupied[i];
+      const bucket = buckets[key];
+      if (bucket) {
+        bucket.length = 0;
+        pool.push(bucket);
+        buckets[key] = undefined;
+      }
+    }
+    occupied.length = 0;
+  }
+
+  _rebuildEnemyGrid() {
+    this._ensureGridStorage();
+    this._resetEnemyGrid();
+    const buckets = this._gridBuckets;
+    const pool = this._gridBucketPool;
+    const occupied = this._gridOccupiedKeys;
+    for (const enemy of this.enemies.values()) {
+      // Lazily compute the parsed numeric id once per enemy. Determinism-
+      // critical paths sort grid candidates by this value to mimic the
+      // ascending-insertion-order semantics of Map.values().
+      if (enemy._numericId === undefined) {
+        const idStr = enemy.id;
+        let nid = 0;
+        if (typeof idStr === "string") {
+          for (let k = 0; k < idStr.length; k += 1) {
+            const c = idStr.charCodeAt(k);
+            if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
+          }
+        }
+        enemy._numericId = nid;
+      }
+      const cx = ((enemy.x + 8192) | 0) >> 7;
+      const cy = ((enemy.y + 8192) | 0) >> 7;
+      const key = (cy << 8) | cx;
+      let bucket = buckets[key];
+      if (!bucket) {
+        bucket = pool.length ? pool.pop() : [];
+        buckets[key] = bucket;
+        occupied.push(key);
+      }
+      bucket.push(enemy);
+      enemy._gridKey = key;
+    }
+  }
+
+  // Insert a freshly-spawned enemy into the live grid so queries later in
+  // the same step() see it. Called from spawnSplitChildren / spawnBossMinion.
+  _addEnemyToGrid(enemy) {
+    if (!this._gridBuckets) return;
+    if (enemy._numericId === undefined) {
+      const idStr = enemy.id;
+      let nid = 0;
+      if (typeof idStr === "string") {
+        for (let k = 0; k < idStr.length; k += 1) {
+          const c = idStr.charCodeAt(k);
+          if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
+        }
+      }
+      enemy._numericId = nid;
+    }
+    const cx = ((enemy.x + 8192) | 0) >> 7;
+    const cy = ((enemy.y + 8192) | 0) >> 7;
+    const key = (cy << 8) | cx;
+    const buckets = this._gridBuckets;
+    let bucket = buckets[key];
+    if (!bucket) {
+      const pool = this._gridBucketPool;
+      bucket = pool.length ? pool.pop() : [];
+      buckets[key] = bucket;
+      this._gridOccupiedKeys.push(key);
+    }
+    bucket.push(enemy);
+    enemy._gridKey = key;
+  }
+
+  // Push every enemy whose current position is within `radius` of (x, y)
+  // into `out` (which is reset to length 0). Reads enemy.x/.y live, so the
+  // result reflects this-frame movement even though buckets were assigned
+  // at frame start (any drift is far smaller than a cell).
+  _queryEnemiesInRadius(x, y, radius, out) {
+    out.length = 0;
+    // Tests exercise splash/chain/burst paths by calling updateProjectiles
+    // or damageEnemy directly, without going through step(). Build the grid
+    // on first query so those paths still see the right candidate set.
+    if (!this._gridBuckets) this._rebuildEnemyGrid();
+    const buckets = this._gridBuckets;
+    if (this._gridOccupiedKeys.length === 0) return out;
+    const radiusSq = radius * radius;
+    const minCx = ((x - radius + 8192) | 0) >> 7;
+    const maxCx = ((x + radius + 8192) | 0) >> 7;
+    const minCy = ((y - radius + 8192) | 0) >> 7;
+    const maxCy = ((y + radius + 8192) | 0) >> 7;
+    for (let cy = minCy; cy <= maxCy; cy += 1) {
+      const cyShift = cy << 8;
+      for (let cx = minCx; cx <= maxCx; cx += 1) {
+        const bucket = buckets[cyShift | cx];
+        if (!bucket) continue;
+        for (let i = 0; i < bucket.length; i += 1) {
+          const enemy = bucket[i];
+          const dx = enemy.x - x;
+          const dy = enemy.y - y;
+          if (dx * dx + dy * dy <= radiusSq) out.push(enemy);
+        }
+      }
+    }
+    return out;
+  }
+
   enemyArmorAuraBonus(enemy) {
     if (!this.enemies.has(enemy.id)) return 0;
-    // Refresh "any warden" hint per tick.
-    if (this._wardenHintTick !== this.tick) {
-      let hasWarden = false;
+    // Cache the warden list once per tick. With wardens being rare relative
+    // to total enemies, iterating only wardens is ~N/W times cheaper than
+    // scanning the full enemy map for every damage event in the tick.
+    if (this._wardenListTick !== this.tick) {
+      let wardens = this._wardenList;
+      if (!wardens) wardens = this._wardenList = [];
+      wardens.length = 0;
       for (const other of this.enemies.values()) {
-        if (other.type === "warden" && other.hp > 0) { hasWarden = true; break; }
+        if (other.type === "warden" && other.hp > 0) wardens.push(other);
       }
-      this._wardenHintTick = this.tick;
-      this._wardenHint = hasWarden;
+      this._wardenListTick = this.tick;
     }
-    if (!this._wardenHint) return 0;
+    const wardens = this._wardenList;
+    if (!wardens.length) return 0;
     const ex = enemy.x;
     const ey = enemy.y;
     const eid = enemy.id;
-    for (const other of this.enemies.values()) {
-      if (other.type !== "warden" || other.hp <= 0 || other.id === eid) continue;
+    for (let i = 0; i < wardens.length; i += 1) {
+      const other = wardens[i];
+      // Cached list may include a warden that has died this tick; skip it.
+      if (other.hp <= 0 || other.id === eid) continue;
       const dx = ex - other.x;
       const dy = ey - other.y;
       if (dx * dx + dy * dy <= 36100) return 5;
@@ -1338,8 +1575,13 @@ export class GameSimulation {
 
   updateEnemyStatusDamage(enemy, dt) {
     if (enemy.markedFor > 0) enemy.markedFor = Math.max(0, enemy.markedFor - dt);
-    updateAilments(this, enemy, dt);
-    if (!this.enemies.has(enemy.id)) return;
+    // Skip the updateAilments call entirely when this enemy has no active
+    // ailments. The flag is maintained by ailments.js and covers the common
+    // case where most spawned enemies never get debuffed in their lifetime.
+    if (enemy._hasActiveAilments) {
+      updateAilments(this, enemy, dt);
+      if (!this.enemies.has(enemy.id)) return;
+    }
     if (!(enemy.burnFor > 0) || !(enemy.burnDps > 0)) return;
     enemy.burnFor = Math.max(0, enemy.burnFor - dt);
     this.damageEnemy(enemy, enemy.burnDps * dt, {
@@ -1391,25 +1633,32 @@ export class GameSimulation {
 
   splashProjectileDamage(projectile, firstEnemy) {
     if (!projectile.splashRadius || projectile.splashDamageMultiplier <= 0) return;
-    const radiusSq = projectile.splashRadius * projectile.splashRadius;
+    const out = this._splashScratch ?? (this._splashScratch = []);
+    this._queryEnemiesInRadius(firstEnemy.x, firstEnemy.y, projectile.splashRadius, out);
+    if (out.length > 1) out.sort(byNumericIdAsc);
     let caught = 0;
-    for (const enemy of this.enemies.values()) {
-      if (enemy.id === firstEnemy.id) continue;
-      if (distanceSq(firstEnemy.x, firstEnemy.y, enemy.x, enemy.y) > radiusSq) continue;
+    const splashDamage = projectile.damage * projectile.splashDamageMultiplier;
+    const ownerId = projectile.ownerId;
+    const fx = firstEnemy.x;
+    const fy = firstEnemy.y;
+    const fid = firstEnemy.id;
+    for (let i = 0; i < out.length; i += 1) {
+      const enemy = out[i];
+      if (enemy.id === fid || enemy.hp <= 0 || !this.enemies.has(enemy.id)) continue;
       caught += 1;
-      this.damageEnemy(enemy, projectile.damage * projectile.splashDamageMultiplier, {
-        ownerId: projectile.ownerId,
-        x: firstEnemy.x,
-        y: firstEnemy.y,
-        vx: enemy.x - firstEnemy.x,
-        vy: enemy.y - firstEnemy.y,
+      this.damageEnemy(enemy, splashDamage, {
+        ownerId,
+        x: fx,
+        y: fy,
+        vx: enemy.x - fx,
+        vy: enemy.y - fy,
       });
     }
-    if (caught > 0 && projectile.splashCenterBonusPerTarget > 0 && this.enemies.has(firstEnemy.id)) {
+    if (caught > 0 && projectile.splashCenterBonusPerTarget > 0 && this.enemies.has(fid)) {
       this.damageEnemy(firstEnemy, projectile.damage * projectile.splashCenterBonusPerTarget * caught, {
-        ownerId: projectile.ownerId,
-        x: firstEnemy.x,
-        y: firstEnemy.y,
+        ownerId,
+        x: fx,
+        y: fy,
         vx: 0,
         vy: 0,
       });
@@ -1469,11 +1718,24 @@ export class GameSimulation {
   }
 
   nearestChainTargetOnce(sourceEnemy, excludedIds, range) {
+    // Determinism note: the linear-scan version iterated this.enemies in
+    // ascending insertion order and used `dist <= best` so that ties
+    // resolved to the highest-id enemy. The grid yields candidates in
+    // bucket order; sort by ascending _numericId before the scan so the
+    // same tie-break (highest-id wins) holds.
+    const out = this._chainScratch ?? (this._chainScratch = []);
+    this._queryEnemiesInRadius(sourceEnemy.x, sourceEnemy.y, range, out);
+    if (out.length > 1) out.sort(byNumericIdAsc);
+    const sx = sourceEnemy.x;
+    const sy = sourceEnemy.y;
     let nearest = null;
     let best = range * range;
-    for (const enemy of this.enemies.values()) {
+    for (let i = 0; i < out.length; i += 1) {
+      const enemy = out[i];
       if (excludedIds.has(enemy.id)) continue;
-      const dist = distanceSq(sourceEnemy.x, sourceEnemy.y, enemy.x, enemy.y);
+      const dx = enemy.x - sx;
+      const dy = enemy.y - sy;
+      const dist = dx * dx + dy * dy;
       if (dist <= best) {
         best = dist;
         nearest = enemy;
@@ -1493,20 +1755,26 @@ export class GameSimulation {
     if (dpsSum <= 0) return;
     const burstDamage = dpsSum * 0.6;
     const radius = 70;
-    const radiusSq = radius * radius;
     if (!this.headless) {
       const effectId = this.entityId();
       this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, radius, 0.32));
     }
-    for (const other of this.enemies.values()) {
-      if (other.id === enemy.id || other.hp <= 0) continue;
-      if (distanceSq(enemy.x, enemy.y, other.x, other.y) > radiusSq) continue;
+    const out = this._contagionScratch ?? (this._contagionScratch = []);
+    this._queryEnemiesInRadius(enemy.x, enemy.y, radius, out);
+    if (out.length > 1) out.sort(byNumericIdAsc);
+    const ownerId = owner.id;
+    const ex = enemy.x;
+    const ey = enemy.y;
+    const eid = enemy.id;
+    for (let i = 0; i < out.length; i += 1) {
+      const other = out[i];
+      if (other.id === eid || other.hp <= 0 || !this.enemies.has(other.id)) continue;
       this.damageEnemy(other, burstDamage, {
-        ownerId: owner.id,
-        x: enemy.x,
-        y: enemy.y,
-        vx: other.x - enemy.x,
-        vy: other.y - enemy.y,
+        ownerId,
+        x: ex,
+        y: ey,
+        vx: other.x - ex,
+        vy: other.y - ey,
         damageType: "chaos",
         damageBreakdown: { chaos: burstDamage },
         fromAilment: false,
@@ -1523,20 +1791,26 @@ export class GameSimulation {
     if (igniteDps <= 0) return;
     const burstDamage = igniteDps * 0.8;
     const radius = 80;
-    const radiusSq = radius * radius;
     if (!this.headless) {
       const effectId = this.entityId();
       this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, radius, 0.32));
     }
-    for (const other of this.enemies.values()) {
-      if (other.id === enemy.id || other.hp <= 0) continue;
-      if (distanceSq(enemy.x, enemy.y, other.x, other.y) > radiusSq) continue;
+    const out = this._wildfireScratch ?? (this._wildfireScratch = []);
+    this._queryEnemiesInRadius(enemy.x, enemy.y, radius, out);
+    if (out.length > 1) out.sort(byNumericIdAsc);
+    const ownerId = owner.id;
+    const ex = enemy.x;
+    const ey = enemy.y;
+    const eid = enemy.id;
+    for (let i = 0; i < out.length; i += 1) {
+      const other = out[i];
+      if (other.id === eid || other.hp <= 0 || !this.enemies.has(other.id)) continue;
       this.damageEnemy(other, burstDamage, {
-        ownerId: owner.id,
-        x: enemy.x,
-        y: enemy.y,
-        vx: other.x - enemy.x,
-        vy: other.y - enemy.y,
+        ownerId,
+        x: ex,
+        y: ey,
+        vx: other.x - ex,
+        vy: other.y - ey,
         damageType: "fire",
         damageBreakdown: { fire: burstDamage },
         fromAilment: false,
@@ -1566,7 +1840,6 @@ export class GameSimulation {
 
   triggerShatterBurst(sourceEnemy, source) {
     const radius = source.shatterRadius || 70;
-    const radiusSq = radius * radius;
     const critMult = source.isCritical ? source.shatterCritMultiplier || 1 : 1;
     const burstDamage = (source.shatterDamage || 0) * critMult;
     if (burstDamage <= 0) return;
@@ -1576,20 +1849,37 @@ export class GameSimulation {
     }
     // Hit the source enemy too (includes freeze-immune bosses via brittle path),
     // then nearby enemies. fromAilment:true so the burst cannot re-apply ailments.
-    const targets = [sourceEnemy];
-    for (const other of this.enemies.values()) {
-      if (other.id === sourceEnemy.id || other.hp <= 0) continue;
-      if (distanceSq(sourceEnemy.x, sourceEnemy.y, other.x, other.y) > radiusSq) continue;
-      targets.push(other);
+    const out = this._shatterScratch ?? (this._shatterScratch = []);
+    this._queryEnemiesInRadius(sourceEnemy.x, sourceEnemy.y, radius, out);
+    if (out.length > 1) out.sort(byNumericIdAsc);
+    const ownerId = source.ownerId ?? null;
+    const sx = sourceEnemy.x;
+    const sy = sourceEnemy.y;
+    const sid = sourceEnemy.id;
+    // Source first, then nearby enemies in ascending-id order. Preserves the
+    // original Map-iteration ordering used for damage application.
+    if (this.enemies.has(sid) && sourceEnemy.hp > 0) {
+      this.damageEnemy(sourceEnemy, burstDamage, {
+        ownerId,
+        x: sx,
+        y: sy,
+        vx: 0,
+        vy: 0,
+        damageType: "cold",
+        damageBreakdown: { cold: burstDamage },
+        fromAilment: true,
+        ailment: "shatter",
+      });
     }
-    for (const target of targets) {
-      if (!this.enemies.has(target.id) || target.hp <= 0) continue;
+    for (let i = 0; i < out.length; i += 1) {
+      const target = out[i];
+      if (target.id === sid || target.hp <= 0 || !this.enemies.has(target.id)) continue;
       this.damageEnemy(target, burstDamage, {
-        ownerId: source.ownerId ?? null,
-        x: sourceEnemy.x,
-        y: sourceEnemy.y,
-        vx: target.x - sourceEnemy.x,
-        vy: target.y - sourceEnemy.y,
+        ownerId,
+        x: sx,
+        y: sy,
+        vx: target.x - sx,
+        vy: target.y - sy,
         damageType: "cold",
         damageBreakdown: { cold: burstDamage },
         fromAilment: true,
@@ -1762,7 +2052,6 @@ export class GameSimulation {
     const shock = enemy.ailments?.shock;
     if (!shock || !(shock.remaining > 0)) return;
     const radius = 90;
-    const radiusSq = radius * radius;
     // Damage scales with the shock magnitude that was on the corpse — a
     // bigger overload means a bigger goodbye.
     const burstDamage = 18 + (shock.magnitude || 0) * 60;
@@ -1770,15 +2059,22 @@ export class GameSimulation {
       const effectId = this.entityId();
       this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, radius, 0.28));
     }
-    for (const other of this.enemies.values()) {
-      if (other.id === enemy.id || other.hp <= 0) continue;
-      if (distanceSq(enemy.x, enemy.y, other.x, other.y) > radiusSq) continue;
+    const out = this._staticScratch ?? (this._staticScratch = []);
+    this._queryEnemiesInRadius(enemy.x, enemy.y, radius, out);
+    if (out.length > 1) out.sort(byNumericIdAsc);
+    const ownerId = owner.id;
+    const ex = enemy.x;
+    const ey = enemy.y;
+    const eid = enemy.id;
+    for (let i = 0; i < out.length; i += 1) {
+      const other = out[i];
+      if (other.id === eid || other.hp <= 0 || !this.enemies.has(other.id)) continue;
       this.damageEnemy(other, burstDamage, {
-        ownerId: owner.id,
-        x: enemy.x,
-        y: enemy.y,
-        vx: other.x - enemy.x,
-        vy: other.y - enemy.y,
+        ownerId,
+        x: ex,
+        y: ey,
+        vx: other.x - ex,
+        vy: other.y - ey,
         damageType: "lightning",
         damageBreakdown: { lightning: burstDamage },
         fromAilment: true,
@@ -1830,6 +2126,7 @@ export class GameSimulation {
       child.hitVy = Math.sin(angle) * 80;
       this.applyEnemyScaling(child);
       this.enemies.set(child.id, child);
+      this._addEnemyToGrid(child);
     }
   }
 
@@ -1863,27 +2160,34 @@ export class GameSimulation {
   spawnGravityBurst(player) {
     const effectId = this.entityId();
     if (!this.headless) this.effects.set(effectId, createEffect(effectId, "gravityWell", player.x, player.y, 240, 0.46));
-    for (const enemy of this.enemies.values()) {
-      const dist = Math.sqrt(distanceSq(player.x, player.y, enemy.x, enemy.y));
-      const radius = 240 * player.stats.area;
-      if (dist < radius) {
-        const direction = normalize(player.x - enemy.x, player.y - enemy.y);
-        enemy.x += direction.x * 52 * player.stats.gravityWell * player.stats.area;
-        enemy.y += direction.y * 52 * player.stats.gravityWell * player.stats.area;
-        this.damageEnemy(enemy, 22 * player.stats.gravityWell, {
-          x: player.x,
-          y: player.y,
-          vx: enemy.x - player.x,
-          vy: enemy.y - player.y,
-        });
-      }
+    const radius = 240 * player.stats.area;
+    const out = this._gravityScratch ?? (this._gravityScratch = []);
+    this._queryEnemiesInRadius(player.x, player.y, radius, out);
+    if (out.length > 1) out.sort(byNumericIdAsc);
+    const px = player.x;
+    const py = player.y;
+    const pull = 52 * player.stats.gravityWell * player.stats.area;
+    const dmg = 22 * player.stats.gravityWell;
+    for (let i = 0; i < out.length; i += 1) {
+      const enemy = out[i];
+      if (enemy.hp <= 0 || !this.enemies.has(enemy.id)) continue;
+      const direction = normalize(px - enemy.x, py - enemy.y);
+      enemy.x += direction.x * pull;
+      enemy.y += direction.y * pull;
+      this.damageEnemy(enemy, dmg, {
+        x: px,
+        y: py,
+        vx: enemy.x - px,
+        vy: enemy.y - py,
+      });
     }
   }
 
   cleanupFarEntities() {
     const limitSq = 1800 * 1800;
     const players = this.players;
-    let toRemove = null;
+    // Map iteration tolerates deletion of the current entry, so we can drop
+    // far enemies in place instead of staging an id list and re-iterating.
     for (const enemy of this.enemies.values()) {
       let close = false;
       for (const player of players.values()) {
@@ -1894,13 +2198,7 @@ export class GameSimulation {
           break;
         }
       }
-      if (!close) {
-        if (!toRemove) toRemove = [];
-        toRemove.push(enemy.id);
-      }
-    }
-    if (toRemove) {
-      for (let i = 0; i < toRemove.length; i += 1) this.enemies.delete(toRemove[i]);
+      if (!close) this.enemies.delete(enemy.id);
     }
   }
 

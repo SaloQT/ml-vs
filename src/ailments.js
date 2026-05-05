@@ -128,6 +128,12 @@ export const AILMENT_CONFIG = {
 
 const HARD_DISABLE_AILMENTS = new Set(["freeze"]);
 
+// Frozen iteration order for AILMENT_CONFIG. Hot paths use this instead of
+// Object.keys(AILMENT_CONFIG) to avoid an array allocation per hit/per frame.
+// Order MUST match insertion order in AILMENT_CONFIG so RNG-driven rolls
+// remain deterministic across versions.
+const AILMENT_NAMES = ["bleed", "poison", "ignite", "chill", "freeze", "shock", "scorch", "brittle", "sap"];
+
 export function emptyAilmentState() {
   return {};
 }
@@ -140,13 +146,11 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-function computeRollStrength(cfg, hitDamage, enemyMaxHp, rank) {
+function computeRollStrength(name, cfg, hitDamage, enemyMaxHp, rank) {
   if (!hitDamage || !enemyMaxHp) return 0;
   let threshold = cfg.threshold;
-  if (HARD_DISABLE_AILMENTS.has(cfg._name) || cfg.bossResistance || cfg.eliteResistance) {
-    if (rank === "boss" && cfg.bossResistance) threshold *= cfg.bossResistance;
-    else if (rank === "elite" && cfg.eliteResistance) threshold *= cfg.eliteResistance;
-  }
+  if (rank === "boss" && cfg.bossResistance) threshold *= cfg.bossResistance;
+  else if (rank === "elite" && cfg.eliteResistance) threshold *= cfg.eliteResistance;
   const ratio = hitDamage / Math.max(1, enemyMaxHp);
   return clamp01(ratio / threshold);
 }
@@ -154,10 +158,10 @@ function computeRollStrength(cfg, hitDamage, enemyMaxHp, rank) {
 function pickDamageOfTypes(breakdown, totalDamage, types) {
   if (!breakdown) {
     // Legacy hits with no breakdown only carry physical.
-    return types.includes("physical") ? totalDamage : 0;
+    return types.indexOf("physical") >= 0 ? totalDamage : 0;
   }
   let sum = 0;
-  for (const t of types) sum += breakdown[t] ?? 0;
+  for (let i = 0; i < types.length; i += 1) sum += breakdown[types[i]] ?? 0;
   return sum;
 }
 
@@ -168,14 +172,15 @@ export function applyAilmentsFromHit(enemy, hit, rng) {
   if (!enemy.ailments) enemy.ailments = {};
   const breakdown = hit.breakdown ?? null;
   const fallbackType = hit.damageType ?? "physical";
-  for (const name of Object.keys(AILMENT_CONFIG)) {
-    const cfg = { ...AILMENT_CONFIG[name], _name: name };
-    if (name === "poison" && hit.poisonMaxStacks > 0) {
-      cfg.maxStacks = hit.poisonMaxStacks;
-    }
+  const enemyMaxHp = enemy.maxHp;
+  const enemyRank = enemy.rank;
+  for (let ni = 0; ni < AILMENT_NAMES.length; ni += 1) {
+    const name = AILMENT_NAMES[ni];
+    const cfg = AILMENT_CONFIG[name];
+    const sources = cfg.sources;
     let typedDamage = breakdown
-      ? pickDamageOfTypes(breakdown, hit.damage, cfg.sources)
-      : cfg.sources.includes(fallbackType)
+      ? pickDamageOfTypes(breakdown, hit.damage, sources)
+      : sources.indexOf(fallbackType) >= 0
         ? hit.damage
         : 0;
     if (typedDamage <= 0) continue;
@@ -185,7 +190,7 @@ export function applyAilmentsFromHit(enemy, hit, rng) {
     if (name === "ignite" && hit.igniteDotMultiplier > 0 && hit.igniteDotMultiplier !== 1) {
       typedDamage *= hit.igniteDotMultiplier;
     }
-    const strength = computeRollStrength(cfg, typedDamage, enemy.maxHp, enemy.rank);
+    const strength = computeRollStrength(name, cfg, typedDamage, enemyMaxHp, enemyRank);
     if (strength <= 0) continue;
     const chance = lerp(cfg.chanceFloor, cfg.chanceMax, strength);
     if (rng.next() >= chance) continue;
@@ -194,88 +199,117 @@ export function applyAilmentsFromHit(enemy, hit, rng) {
       cfg.magnitudeMin !== undefined ? lerp(cfg.magnitudeMin, cfg.magnitudeMax, strength) : 0;
     if (name === "scorch" && hit.scorchMagnitudeBonus > 0 && magnitude > 0) {
       magnitude += hit.scorchMagnitudeBonus;
-    }
-    if (name === "brittle" && hit.brittleMagnitudeBonus > 0) {
+    } else if (name === "brittle" && hit.brittleMagnitudeBonus > 0) {
       magnitude = Math.min(1, magnitude + hit.brittleMagnitudeBonus);
-    }
-    if (name === "shock" && hit.shockMagnitudeBonus > 0) {
+    } else if (name === "shock" && hit.shockMagnitudeBonus > 0) {
       // Additive bonus, capped at 1.0 so shocked enemies never take >2x damage.
       magnitude = Math.min(1, magnitude + hit.shockMagnitudeBonus);
-    }
-    if (name === "sap" && hit.sapMagnitudeBonus > 0) {
+    } else if (name === "sap" && hit.sapMagnitudeBonus > 0) {
       // Additive bonus, capped at 0.6 so sap can never zero out enemy damage.
       magnitude = Math.min(0.6, magnitude + hit.sapMagnitudeBonus);
     }
     const dotTotal = cfg.dotFraction ? typedDamage * cfg.dotFraction : 0;
     const dotPerSecond = duration > 0 ? dotTotal / duration : 0;
-    applyAilment(enemy, name, cfg, {
+    const maxStacksOverride =
+      name === "poison" && hit.poisonMaxStacks > 0 ? hit.poisonMaxStacks : 0;
+    applyAilment(
+      enemy,
+      name,
+      cfg,
       duration,
       magnitude,
       dotPerSecond,
-      ownerId: hit.ownerId ?? null,
-    });
+      hit.ownerId ?? null,
+      maxStacksOverride,
+    );
   }
 }
 
-function applyAilment(enemy, name, cfg, payload) {
+function applyAilment(enemy, name, cfg, duration, magnitude, dotPerSecond, ownerId, maxStacksOverride) {
+  const tickRate = cfg.tickRate ?? 0.25;
   if (cfg.stack) {
     if (!enemy.ailments[name]) enemy.ailments[name] = { stacks: [] };
     const stacks = enemy.ailments[name].stacks;
     stacks.push({
-      remaining: payload.duration,
+      remaining: duration,
       tickAccumulator: 0,
-      tickRate: cfg.tickRate ?? 0.25,
-      dotPerSecond: payload.dotPerSecond,
-      magnitude: payload.magnitude,
-      ownerId: payload.ownerId,
+      tickRate,
+      dotPerSecond,
+      magnitude,
+      ownerId,
     });
-    if (cfg.maxStacks && stacks.length > cfg.maxStacks) {
+    const cap = maxStacksOverride > 0 ? maxStacksOverride : cfg.maxStacks;
+    if (cap && stacks.length > cap) {
       stacks.sort((a, b) => a.dotPerSecond - b.dotPerSecond);
-      stacks.splice(0, stacks.length - cfg.maxStacks);
+      stacks.splice(0, stacks.length - cap);
     }
+    enemy._hasActiveAilments = true;
     return;
   }
   const existing = enemy.ailments[name];
   // Replace if new instance is stronger (longer remaining or higher dps/magnitude).
-  const newStrength = (payload.dotPerSecond || 0) + (payload.magnitude || 0) * 10;
+  const newStrength = (dotPerSecond || 0) + (magnitude || 0) * 10;
   const oldStrength = existing
     ? (existing.dotPerSecond || 0) + (existing.magnitude || 0) * 10
     : -Infinity;
-  if (!existing || newStrength >= oldStrength || (existing.remaining ?? 0) < payload.duration * 0.5) {
+  if (!existing || newStrength >= oldStrength || (existing.remaining ?? 0) < duration * 0.5) {
     enemy.ailments[name] = {
-      remaining: payload.duration,
+      remaining: duration,
       tickAccumulator: 0,
-      tickRate: cfg.tickRate ?? 0.25,
-      dotPerSecond: payload.dotPerSecond,
-      magnitude: payload.magnitude,
-      ownerId: payload.ownerId,
+      tickRate,
+      dotPerSecond,
+      magnitude,
+      ownerId,
     };
   } else if (existing) {
-    existing.remaining = Math.max(existing.remaining, payload.duration);
+    existing.remaining = Math.max(existing.remaining, duration);
   }
+  enemy._hasActiveAilments = true;
 }
 
 // Tick all DOTs and decay durations. Calls simulation.damageEnemy with
 // {fromAilment:true} for damage so we don't recurse into ailment rolls.
 export function updateAilments(simulation, enemy, dt) {
-  if (!enemy.ailments) return;
   const ailments = enemy.ailments;
-  for (const name of Object.keys(ailments)) {
+  if (!ailments) return;
+  // Fast bail when the enemy has no active ailments — the common case for the
+  // bulk of enemies on screen. Avoids an Object.keys allocation per enemy
+  // per frame. The _hasActiveAilments flag in simulation hot paths short-
+  // circuits the call entirely; this is a redundancy guard for direct callers.
+  let hasAny = false;
+  for (const k in ailments) { hasAny = true; break; }
+  if (!hasAny) {
+    enemy._hasActiveAilments = false;
+    return;
+  }
+  for (let ni = 0; ni < AILMENT_NAMES.length; ni += 1) {
+    const name = AILMENT_NAMES[ni];
     const entry = ailments[name];
     if (!entry) continue;
     if (entry.stacks) {
-      let remaining = 0;
-      for (const stack of entry.stacks) {
+      const stacks = entry.stacks;
+      let writeIdx = 0;
+      for (let j = 0; j < stacks.length; j += 1) {
+        const stack = stacks[j];
         tickStack(simulation, enemy, name, stack, dt);
-        if (stack.remaining > 0) remaining += 1;
+        if (stack.remaining > 0) {
+          if (writeIdx !== j) stacks[writeIdx] = stack;
+          writeIdx += 1;
+        }
       }
-      entry.stacks = entry.stacks.filter((s) => s.remaining > 0);
-      if (!remaining) delete ailments[name];
+      if (writeIdx !== stacks.length) stacks.length = writeIdx;
+      if (!writeIdx) delete ailments[name];
     } else {
       tickStack(simulation, enemy, name, entry, dt);
       if (entry.remaining <= 0) delete ailments[name];
     }
   }
+  // Refresh the cached "any active ailment" flag so simulation hot paths
+  // (updateEnemyStatusDamage, updateEnemies) can skip the call entirely on
+  // the next frame when this enemy has no active ailments.
+  let stillAny = false;
+  for (const k in ailments) { stillAny = true; break; }
+  enemy._hasActiveAilments = stillAny;
 }
 
 function tickStack(simulation, enemy, name, stack, dt) {
