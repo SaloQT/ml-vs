@@ -1711,16 +1711,19 @@ export class GameSimulation {
     }
     if (!(enemy.burnFor > 0) || !(enemy.burnDps > 0)) return;
     enemy.burnFor = Math.max(0, enemy.burnFor - dt);
-    this.damageEnemy(enemy, enemy.burnDps * dt, {
-      ownerId: enemy.burnOwnerId,
-      x: enemy.x,
-      y: enemy.y,
-      vx: 0,
-      vy: 0,
-      allowSubUnitDamage: true,
-      ignoreArmor: true,
-      fromAilment: true,
-    });
+    // Reuse a per-enemy source object across ticks: damageEnemy reads source
+    // fields but never stores or compares the object reference, so mutation
+    // is safe and observable behavior is unchanged. Avoids ~1 alloc per
+    // burning enemy per tick at peak ailment density.
+    let src = enemy._burnSource;
+    if (!src) src = enemy._burnSource = {
+      ownerId: null, x: 0, y: 0, vx: 0, vy: 0,
+      allowSubUnitDamage: true, ignoreArmor: true, fromAilment: true,
+    };
+    src.ownerId = enemy.burnOwnerId;
+    src.x = enemy.x;
+    src.y = enemy.y;
+    this.damageEnemy(enemy, enemy.burnDps * dt, src);
   }
 
   chainProjectileDamage(projectile, firstEnemy) {
