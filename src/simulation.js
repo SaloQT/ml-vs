@@ -451,6 +451,13 @@ export class GameSimulation {
           player.rimeLanceCooldown = 1 / (0.6 * this.playerFireRate(player) / player.stats.fireRate);
         }
       }
+      if (player.stats.tempestCoilLevel > 0) {
+        player.tempestCoilCooldown = (player.tempestCoilCooldown ?? 0) - dt;
+        if (player.tempestCoilCooldown <= 0) {
+          this.fireTempestCoil(player, { x: aimDx, y: aimDy });
+          player.tempestCoilCooldown = 1 / (0.5 * this.playerFireRate(player) / player.stats.fireRate);
+        }
+      }
     }
   }
 
@@ -952,6 +959,7 @@ export class GameSimulation {
           this.applyProjectileStatuses(projectile, enemy);
           this.splashProjectileDamage(projectile, enemy);
           this.chainProjectileDamage(projectile, enemy);
+          this.tempestCoilChainDamage(projectile, enemy);
           this.droneRelayDamage(projectile, enemy);
           if (this.ricochetProjectile(projectile, enemy)) break;
           if (projectile.pierce > 0) {
@@ -1084,6 +1092,11 @@ export class GameSimulation {
       const igniteDotMultiplier = ownerPlayer?.stats?.conflagration1 > 0 ? 1.4 : 1;
       const scorchMagnitudeBonus = ownerPlayer?.stats?.conflagration3 > 0 ? 0.25 : 0;
       const brittleMagnitudeBonus = source.cryoclasmBrittleBonus ?? 0;
+      // Tempest Coil overcharges. Per-source `shockMagnitudeBonus` /
+      // `sapMagnitudeBonus` on the projectile/hit override the weaker player
+      // default, so non-tempest hits don't get a free shock buff.
+      const shockMagnitudeBonus = source.shockMagnitudeBonus ?? 0;
+      const sapMagnitudeBonus = source.sapMagnitudeBonus ?? 0;
       applyAilmentsFromHit(
         enemy,
         {
@@ -1096,6 +1109,8 @@ export class GameSimulation {
           igniteDotMultiplier,
           scorchMagnitudeBonus,
           brittleMagnitudeBonus,
+          shockMagnitudeBonus,
+          sapMagnitudeBonus,
         },
         this.rng,
       );
@@ -1125,6 +1140,7 @@ export class GameSimulation {
     }
     this.triggerContagionBurst(enemy, owner, source);
     this.triggerWildfireBurst(enemy, owner, source);
+    this.triggerStaticDischarge(enemy, owner);
     this.triggerEnemyDeathAffixes(enemy, owner);
     this.spawnSplitChildren(enemy);
     const pickup = this.createEnemyDrop(enemy, owner);
@@ -1665,6 +1681,110 @@ export class GameSimulation {
       },
     );
     this.projectiles.set(projectile.id, projectile);
+  }
+
+  fireTempestCoil(player, aimDirection = null) {
+    const direction = normalize(aimDirection?.x ?? player.facingX, aimDirection?.y ?? player.facingY);
+    const baseDamage = 30;
+    const breakdown = { lightning: baseDamage };
+    const overcharge1 = player.stats.overcharge1 > 0;
+    const overcharge2 = player.stats.overcharge2 > 0;
+    // Tier I deepens the chain; tier II overloads it (more shock, more sap).
+    const tempestArcs = 2 + (overcharge1 ? 2 : 0);
+    const tempestDamageMultiplier = 0.55 + (overcharge1 ? 0.15 : 0);
+    const shockMagnitudeBonus = overcharge2 ? 0.25 : 0;
+    const sapMagnitudeBonus = overcharge2 ? 0.1 : 0;
+    const projectile = createProjectile(
+      this.entityId(),
+      player.id,
+      player.x + direction.x * 26,
+      player.y + direction.y * 26,
+      direction.x * 460,
+      direction.y * 460,
+      baseDamage,
+      Math.max(5, player.stats.projectileRadius + 1),
+      Math.max(player.stats.projectileTtl, 1.4),
+      {
+        pierce: 3,
+        color: "#ffe66b",
+        glowColor: "rgba(140, 200, 255, 0.55)",
+        damageType: "lightning",
+        damageBreakdown: breakdown,
+        weaponKind: "tempestCoil",
+        tempestArcs,
+        tempestRange: 190,
+        tempestDamageMultiplier,
+        shockMagnitudeBonus,
+        sapMagnitudeBonus,
+      },
+    );
+    this.projectiles.set(projectile.id, projectile);
+  }
+
+  // Tempest Coil chain. Hops from the primary hit through up to `tempestArcs`
+  // additional enemies, never re-hitting the same target. Each hop is marked
+  // `fromAilment:true` so it cannot recursively roll new shocks/saps — only
+  // the primary projectile impact and the tier-III death discharge apply
+  // ailments. Hard depth cap prevents infinite chain storms.
+  tempestCoilChainDamage(projectile, firstEnemy) {
+    if (projectile.weaponKind !== "tempestCoil") return;
+    if (!projectile.tempestArcs || !projectile.tempestRange || projectile.tempestDamageMultiplier <= 0) return;
+    const chainedEnemyIds = new Set([firstEnemy.id]);
+    let sourceEnemy = firstEnemy;
+    const hardCap = Math.min(projectile.tempestArcs, 8);
+    for (let arc = 0; arc < hardCap; arc += 1) {
+      const target = this.nearestChainTarget(sourceEnemy, chainedEnemyIds, projectile.tempestRange);
+      if (!target) return;
+      chainedEnemyIds.add(target.id);
+      this.damageEnemy(target, projectile.damage * projectile.tempestDamageMultiplier, {
+        ownerId: projectile.ownerId,
+        x: sourceEnemy.x,
+        y: sourceEnemy.y,
+        vx: target.x - sourceEnemy.x,
+        vy: target.y - sourceEnemy.y,
+        damageType: "lightning",
+        damageBreakdown: { lightning: projectile.damage * projectile.tempestDamageMultiplier },
+        // Chain hops are secondary damage — must NOT re-roll ailments per the
+        // ailment-system contract. Shock/sap come from the primary hit only.
+        fromAilment: true,
+        ailment: "tempestChain",
+      });
+    }
+  }
+
+  // Tier III "Static Discharge": when a shocked enemy dies and the killing
+  // owner has overcharge3, release a single small lightning burst at the
+  // corpse. Damage is `fromAilment:true` so it cannot re-apply shock and
+  // therefore cannot chain into another discharge — capped at one burst per
+  // death.
+  triggerStaticDischarge(enemy, owner) {
+    if (!owner || !(owner.stats.overcharge3 > 0)) return;
+    const shock = enemy.ailments?.shock;
+    if (!shock || !(shock.remaining > 0)) return;
+    const radius = 90;
+    const radiusSq = radius * radius;
+    // Damage scales with the shock magnitude that was on the corpse — a
+    // bigger overload means a bigger goodbye.
+    const burstDamage = 18 + (shock.magnitude || 0) * 60;
+    if (!this.headless) {
+      const effectId = this.entityId();
+      this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, radius, 0.28));
+    }
+    for (const other of this.enemies.values()) {
+      if (other.id === enemy.id || other.hp <= 0) continue;
+      if (distanceSq(enemy.x, enemy.y, other.x, other.y) > radiusSq) continue;
+      this.damageEnemy(other, burstDamage, {
+        ownerId: owner.id,
+        x: enemy.x,
+        y: enemy.y,
+        vx: other.x - enemy.x,
+        vy: other.y - enemy.y,
+        damageType: "lightning",
+        damageBreakdown: { lightning: burstDamage },
+        fromAilment: true,
+        ailment: "staticDischarge",
+      });
+    }
   }
 
   triggerKillVolley(enemy, owner) {

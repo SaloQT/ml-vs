@@ -198,6 +198,14 @@ export function applyAilmentsFromHit(enemy, hit, rng) {
     if (name === "brittle" && hit.brittleMagnitudeBonus > 0) {
       magnitude = Math.min(1, magnitude + hit.brittleMagnitudeBonus);
     }
+    if (name === "shock" && hit.shockMagnitudeBonus > 0) {
+      // Additive bonus, capped at 1.0 so shocked enemies never take >2x damage.
+      magnitude = Math.min(1, magnitude + hit.shockMagnitudeBonus);
+    }
+    if (name === "sap" && hit.sapMagnitudeBonus > 0) {
+      // Additive bonus, capped at 0.6 so sap can never zero out enemy damage.
+      magnitude = Math.min(0.6, magnitude + hit.sapMagnitudeBonus);
+    }
     const dotTotal = cfg.dotFraction ? typedDamage * cfg.dotFraction : 0;
     const dotPerSecond = duration > 0 ? dotTotal / duration : 0;
     applyAilment(enemy, name, cfg, {

@@ -102,6 +102,12 @@ time by passing optional fields on the `hit` object into
 - `hit.brittleMagnitudeBonus` — additive bonus (clamped to 1) added to
   the rolled brittle `magnitude`. Used by Glaciation III (Cryoclasm) to
   push brittle's crit conversion above its baseline range.
+- `hit.shockMagnitudeBonus` — additive bonus applied to the rolled shock
+  magnitude after the strength lerp, clamped at `1.0` so shocked enemies
+  never take more than 2x damage. Used by Tempest Coil's Overcharge II.
+- `hit.sapMagnitudeBonus` — additive bonus applied to the rolled sap
+  magnitude, clamped at `0.6` so enemy outgoing damage can never reach
+  zero. Used by Tempest Coil's Overcharge II.
 
 Cold-archetype weapons (Rime Lance) also use **projectile/source-level
 flags** read by `damageEnemy` rather than `applyAilmentsFromHit`:
@@ -118,6 +124,11 @@ flags** read by `damageEnemy` rather than `applyAilmentsFromHit`:
   Glaciation III (Cryoclasm doubles the burst on critical hits).
 - `source.cryoclasmBrittleBonus` — threaded into `applyAilmentsFromHit`
   as `hit.brittleMagnitudeBonus` for the lance's own brittle rolls.
+
+Both shock/sap magnitude bonuses live on the projectile/source object and
+are forwarded by `damageEnemy` exactly like the poison fields, so any
+future weapon that should over-shock or over-sap can opt in with just two
+projectile-construction-time fields and no further plumbing.
 
 `damageEnemy` looks up the owning player from `source.ownerId` and threads
 these fields through automatically, so weapon/contagion/drone code paths
