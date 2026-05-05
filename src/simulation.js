@@ -437,6 +437,13 @@ export class GameSimulation {
           player.plagueLanceCooldown = 1 / (0.55 * this.playerFireRate(player) / player.stats.fireRate);
         }
       }
+      if (player.stats.rimeLanceLevel > 0) {
+        player.rimeLanceCooldown = (player.rimeLanceCooldown ?? 0) - dt;
+        if (player.rimeLanceCooldown <= 0) {
+          this.fireRimeLance(player, { x: aimDx, y: aimDy });
+          player.rimeLanceCooldown = 1 / (0.6 * this.playerFireRate(player) / player.stats.fireRate);
+        }
+      }
     }
   }
 
@@ -1045,9 +1052,13 @@ export class GameSimulation {
     const markedMultiplier = (enemy.markedFor ?? 0) > 0 ? 1 + (enemy.markedDamageTakenMultiplier ?? 0) : 1;
     const damageType = source?.damageType ?? "physical";
     const ailmentMultiplier = getAilmentDamageTakenMultiplier(enemy, damageType);
+    const frostbiteMultiplier = source?.frostbite && (source.permafrostBonus ?? 0) > 0
+      ? 1 + (this.enemyHasColdAilment(enemy) ? source.permafrostBonus : 0)
+      : 1;
     const minimumDamage = source?.allowSubUnitDamage ? 0 : 1;
     const mitigation = source?.ignoreArmor ? 0 : (enemy.armor ?? 0) + this.enemyArmorAuraBonus(enemy);
-    const appliedDamage = Math.max(minimumDamage, damage * markedMultiplier * ailmentMultiplier - mitigation);
+    const appliedDamage = Math.max(minimumDamage, damage * markedMultiplier * ailmentMultiplier * frostbiteMultiplier - mitigation);
+    const shouldShatter = source?.shatterpoint && !source.fromAilment && this.enemyIsShatterable(enemy);
     enemy.hp -= appliedDamage;
     if (source?.isCritical && source.executeThreshold > 0 && enemy.hp > 0 && enemy.hp <= enemy.maxHp * source.executeThreshold) {
       enemy.hp = 0;
@@ -1063,6 +1074,7 @@ export class GameSimulation {
       const ownerPlayer = source.ownerId ? this.players.get(source.ownerId) : null;
       const poisonDotMultiplier = ownerPlayer?.stats?.virulence1 > 0 ? 1.5 : 1;
       const poisonMaxStacks = ownerPlayer?.stats?.virulence3 > 0 ? 12 : 0;
+      const brittleMagnitudeBonus = source.cryoclasmBrittleBonus ?? 0;
       applyAilmentsFromHit(
         enemy,
         {
@@ -1072,9 +1084,13 @@ export class GameSimulation {
           ownerId: source.ownerId ?? null,
           poisonDotMultiplier,
           poisonMaxStacks,
+          brittleMagnitudeBonus,
         },
         this.rng,
       );
+    }
+    if (shouldShatter) {
+      this.triggerShatterBurst(enemy, source);
     }
     if (enemy.hp > 0 || !this.enemies.has(enemy.id)) return;
     this.enemies.delete(enemy.id);
@@ -1469,6 +1485,94 @@ export class GameSimulation {
         contagionDepth: 1,
       });
     }
+  }
+
+  enemyHasColdAilment(enemy) {
+    const ail = enemy?.ailments;
+    if (!ail) return false;
+    if (ail.chill) return true;
+    if (ail.freeze && ail.freeze.remaining > 0) return true;
+    if (ail.brittle && ail.brittle.remaining > 0) return true;
+    return false;
+  }
+
+  enemyIsShatterable(enemy) {
+    const ail = enemy?.ailments;
+    if (!ail) return false;
+    if (ail.freeze && ail.freeze.remaining > 0) return true;
+    // Brittle path: works even on freeze-immune bosses/elites since brittle has
+    // no rank resistance. This is the "brittle is the crit payoff" hook.
+    if (ail.brittle && ail.brittle.remaining > 0) return true;
+    return false;
+  }
+
+  triggerShatterBurst(sourceEnemy, source) {
+    const radius = source.shatterRadius || 70;
+    const radiusSq = radius * radius;
+    const critMult = source.isCritical ? source.shatterCritMultiplier || 1 : 1;
+    const burstDamage = (source.shatterDamage || 0) * critMult;
+    if (burstDamage <= 0) return;
+    if (!this.headless) {
+      const effectId = this.entityId();
+      this.effects.set(effectId, createEffect(effectId, "volatileBurst", sourceEnemy.x, sourceEnemy.y, radius, 0.3));
+    }
+    // Hit the source enemy too (includes freeze-immune bosses via brittle path),
+    // then nearby enemies. fromAilment:true so the burst cannot re-apply ailments.
+    const targets = [sourceEnemy];
+    for (const other of this.enemies.values()) {
+      if (other.id === sourceEnemy.id || other.hp <= 0) continue;
+      if (distanceSq(sourceEnemy.x, sourceEnemy.y, other.x, other.y) > radiusSq) continue;
+      targets.push(other);
+    }
+    for (const target of targets) {
+      if (!this.enemies.has(target.id) || target.hp <= 0) continue;
+      this.damageEnemy(target, burstDamage, {
+        ownerId: source.ownerId ?? null,
+        x: sourceEnemy.x,
+        y: sourceEnemy.y,
+        vx: target.x - sourceEnemy.x,
+        vy: target.y - sourceEnemy.y,
+        damageType: "cold",
+        damageBreakdown: { cold: burstDamage },
+        fromAilment: true,
+        ailment: "shatter",
+      });
+    }
+  }
+
+  fireRimeLance(player, aimDirection = null) {
+    const direction = normalize(aimDirection?.x ?? player.facingX, aimDirection?.y ?? player.facingY);
+    const baseDamage = 30;
+    const breakdown = { physical: 10, cold: 22 };
+    const permafrost = player.stats.glaciation1 > 0 ? 0.35 : 0;
+    const shatterpoint = player.stats.glaciation2 > 0;
+    const cryoclasm = player.stats.glaciation3 > 0;
+    const projectile = createProjectile(
+      this.entityId(),
+      player.id,
+      player.x + direction.x * 26,
+      player.y + direction.y * 26,
+      direction.x * 540,
+      direction.y * 540,
+      baseDamage,
+      Math.max(4, player.stats.projectileRadius),
+      Math.max(player.stats.projectileTtl, 1.6),
+      {
+        pierce: 2,
+        color: "#bff4ff",
+        glowColor: "rgba(126, 209, 255, 0.6)",
+        damageType: "cold",
+        damageBreakdown: breakdown,
+        frostbite: true,
+        permafrostBonus: permafrost,
+        shatterpoint,
+        shatterRadius: 70,
+        shatterDamage: shatterpoint ? 18 : 0,
+        shatterCritMultiplier: cryoclasm ? 2 : 1,
+        cryoclasmBrittleBonus: cryoclasm ? 0.1 : 0,
+      },
+    );
+    this.projectiles.set(projectile.id, projectile);
   }
 
   firePlagueLance(player, aimDirection = null) {

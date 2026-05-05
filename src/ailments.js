@@ -187,8 +187,11 @@ export function applyAilmentsFromHit(enemy, hit, rng) {
     const chance = lerp(cfg.chanceFloor, cfg.chanceMax, strength);
     if (rng.next() >= chance) continue;
     const duration = lerp(cfg.durationMin, cfg.durationMax, strength);
-    const magnitude =
+    let magnitude =
       cfg.magnitudeMin !== undefined ? lerp(cfg.magnitudeMin, cfg.magnitudeMax, strength) : 0;
+    if (name === "brittle" && hit.brittleMagnitudeBonus > 0) {
+      magnitude = Math.min(1, magnitude + hit.brittleMagnitudeBonus);
+    }
     const dotTotal = cfg.dotFraction ? typedDamage * cfg.dotFraction : 0;
     const dotPerSecond = duration > 0 ? dotTotal / duration : 0;
     applyAilment(enemy, name, cfg, {

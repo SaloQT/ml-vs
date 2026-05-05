@@ -185,6 +185,27 @@ export const UPGRADE_POOL = [
     }),
     "virulence-2",
   ),
+  statUpgrade("rime-lance", "Rime Lance", "rare", "Equip a slow cold lance that pierces 2 enemies and reliably chills/freezes.", 1, (player) => {
+    player.stats.rimeLanceLevel += 1;
+  }),
+  requiresUpgrade(
+    statUpgrade("glaciation-1", "Glaciation I — Permafrost", "rare", "Rime Lance hits deal 35% more damage to chilled, frozen, or brittle enemies.", 1, (player) => {
+      player.stats.glaciation1 = 1;
+    }),
+    "rime-lance",
+  ),
+  requiresUpgrade(
+    statUpgrade("glaciation-2", "Glaciation II — Shatterpoint", "epic", "Rime Lance hits on frozen or brittle enemies erupt in a cold shatter burst.", 1, (player) => {
+      player.stats.glaciation2 = 1;
+    }),
+    "glaciation-1",
+  ),
+  requiresUpgrade(
+    statUpgrade("glaciation-3", "Glaciation III — Cryoclasm", "epic", "Critical Rime Lance hits double the shatter burst and extend brittle by 0.10 magnitude.", 1, (player) => {
+      player.stats.glaciation3 = 1;
+    }),
+    "glaciation-2",
+  ),
 ];
 
 function requiresUpgrade(upgrade, requiredId) {
