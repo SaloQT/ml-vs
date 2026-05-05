@@ -975,14 +975,29 @@ export class Renderer {
     }
     this.emitSpaceDust(dt);
 
-    for (const particle of this.particles) {
-      particle.x += particle.vx * dt;
-      particle.y += particle.vy * dt;
-      particle.vx *= Math.pow(particle.drag, dt * 60);
-      particle.vy *= Math.pow(particle.drag, dt * 60);
-      particle.ttl -= dt;
+    // Single-pass update + compaction. The previous version did two for-of
+    // loops then `filter().slice(-650)` which allocated two arrays per frame
+    // plus the filter closure call per particle. In-place compaction with
+    // a write index keeps the same array identity and order.
+    const arr = this.particles;
+    let w = 0;
+    for (let i = 0; i < arr.length; i += 1) {
+      const p = arr[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      const decay = Math.pow(p.drag, dt * 60);
+      p.vx *= decay;
+      p.vy *= decay;
+      p.ttl -= dt;
+      if (p.ttl > 0) {
+        if (w !== i) arr[w] = p;
+        w += 1;
+      }
     }
-    this.particles = this.particles.filter((particle) => particle.ttl > 0).slice(-650);
+    arr.length = w;
+    // Cap to the newest 650 by trimming the head, matching the prior
+    // `.slice(-650)` semantics.
+    if (w > 650) arr.splice(0, w - 650);
   }
 
   ingestEffects(snapshot) {
@@ -1041,14 +1056,24 @@ export class Renderer {
 
   updateDamageNumbers(dt) {
     if (dt <= 0) return;
-    for (const number of this.damageNumbers) {
-      number.x += number.vx * dt;
-      number.y += number.vy * dt;
-      number.vx *= Math.pow(0.88, dt * 60);
-      number.vy += 28 * dt;
-      number.ttl -= dt;
+    // Single-pass update + in-place compaction; saves one array allocation
+    // and the filter closure call per damage number per frame.
+    const arr = this.damageNumbers;
+    const decay = Math.pow(0.88, dt * 60);
+    let w = 0;
+    for (let i = 0; i < arr.length; i += 1) {
+      const n = arr[i];
+      n.x += n.vx * dt;
+      n.y += n.vy * dt;
+      n.vx *= decay;
+      n.vy += 28 * dt;
+      n.ttl -= dt;
+      if (n.ttl > 0) {
+        if (w !== i) arr[w] = n;
+        w += 1;
+      }
     }
-    this.damageNumbers = this.damageNumbers.filter((number) => number.ttl > 0);
+    arr.length = w;
   }
 
   drawDamageNumbers() {
