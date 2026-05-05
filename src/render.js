@@ -763,7 +763,7 @@ export class Renderer {
         ctx.fill();
       }
       if (volatileWarning) {
-        ctx.globalAlpha = Math.max(0, Math.sin(elapsed * TWO_PI2));
+        ctx.globalAlpha = Math.max(0, Math.sin(elapsed * Math.PI * 22));
         ctx.fillStyle = "#ffffff";
         ctx.beginPath();
         ctx.arc(enemy.x, enemy.y + bob, enemy.radius * 0.4, 0, TWO_PI);

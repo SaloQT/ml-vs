@@ -1054,7 +1054,7 @@ function renderArmoryHeader(featuredUpgrade) {
   `;
   header.querySelector("#armory-launch").addEventListener("click", () => {
     closePanel(armoryPanel, openArmory);
-    startRun.click();
+    startPlayerRun();
   });
   return header;
 }
@@ -1489,7 +1489,7 @@ function renderArmoryEmptyState() {
   `;
   banner.querySelector("#armory-launch-first").addEventListener("click", () => {
     closePanel(armoryPanel, openArmory);
-    startRun.click();
+    startPlayerRun();
   });
   return banner;
 }
