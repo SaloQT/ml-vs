@@ -185,6 +185,27 @@ export const UPGRADE_POOL = [
     }),
     "virulence-2",
   ),
+  statUpgrade("pyre-brand", "Pyre Brand", "rare", "Equip a heavy fire brand that pierces 2 enemies and reliably ignites and scorches.", 1, (player) => {
+    player.stats.pyreBrandLevel += 1;
+  }),
+  requiresUpgrade(
+    statUpgrade("conflagration-1", "Conflagration I — Cinderbloom", "rare", "Your ignites deal 40% more damage over time.", 1, (player) => {
+      player.stats.conflagration1 = 1;
+    }),
+    "pyre-brand",
+  ),
+  requiresUpgrade(
+    statUpgrade("conflagration-2", "Conflagration II — Wildfire", "epic", "Ignited enemies that die erupt in a fire burst that ignites neighbours.", 1, (player) => {
+      player.stats.conflagration2 = 1;
+    }),
+    "conflagration-1",
+  ),
+  requiresUpgrade(
+    statUpgrade("conflagration-3", "Conflagration III — Pyroclasm", "epic", "Your fire hits inflict deeper scorch (+25% fire damage taken bonus).", 1, (player) => {
+      player.stats.conflagration3 = 1;
+    }),
+    "conflagration-2",
+  ),
 ];
 
 function requiresUpgrade(upgrade, requiredId) {

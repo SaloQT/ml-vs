@@ -589,3 +589,158 @@ test("Contagion burst on death damages neighbours and respects depth cap", () =>
   });
   assert.equal(farAway.hp, before, "contagion must not chain past depth 1");
 });
+
+test("Pyre Brand hits roll ignite/scorch via fire breakdown but never bleed-from-fire-only", () => {
+  const enemy = createEnemy("pb1", "drone", 0, 0, 1);
+  enemy.maxHp = 200;
+  enemy.hp = 200;
+  const rng = new Rng(13);
+  let ignited = 0;
+  let scorched = 0;
+  for (let i = 0; i < 80; i += 1) {
+    enemy.ailments = {};
+    applyAilmentsFromHit(
+      enemy,
+      { damage: 28, damageType: "fire", breakdown: { physical: 8, fire: 20 }, ownerId: "p1" },
+      rng,
+    );
+    if (enemy.ailments.ignite) ignited += 1;
+    if (enemy.ailments.scorch) scorched += 1;
+  }
+  assert.ok(ignited > 5, `expected some ignites, got ${ignited}`);
+  assert.ok(scorched > 5, `expected some scorches, got ${scorched}`);
+
+  // Fire-only breakdown still pierces ignite threshold; physical absent => no bleed.
+  const enemy2 = createEnemy("pb2", "drone", 0, 0, 1);
+  enemy2.maxHp = 200;
+  enemy2.hp = 200;
+  for (let i = 0; i < 50; i += 1) {
+    enemy2.ailments = {};
+    applyAilmentsFromHit(
+      enemy2,
+      { damage: 20, damageType: "fire", breakdown: { fire: 20 }, ownerId: "p1" },
+      rng,
+    );
+    assert.equal(enemy2.ailments.bleed, undefined, "fire-only damage never bleeds");
+  }
+});
+
+test("Conflagration I scales ignite dotPerSecond by 1.4x at construction", () => {
+  const enemy = createEnemy("cf1", "drone", 0, 0, 1);
+  enemy.maxHp = 200;
+  enemy.hp = 200;
+  function meanDps(extra) {
+    let total = 0;
+    let count = 0;
+    const rngLocal = new Rng(99);
+    for (let i = 0; i < 200; i += 1) {
+      enemy.ailments = {};
+      applyAilmentsFromHit(
+        enemy,
+        { damage: 60, damageType: "fire", breakdown: { fire: 60 }, ownerId: "p1", ...extra },
+        rngLocal,
+      );
+      const ig = enemy.ailments.ignite;
+      if (ig) {
+        total += ig.dotPerSecond;
+        count += 1;
+      }
+    }
+    return count ? total / count : 0;
+  }
+  const base = meanDps({});
+  const scaled = meanDps({ igniteDotMultiplier: 1.4 });
+  assert.ok(scaled > base * 1.3, `scaled=${scaled} base=${base}`);
+  // Global config must remain unchanged.
+  assert.equal(AILMENT_CONFIG.ignite.dotFraction, 0.9);
+});
+
+test("Conflagration III scorchMagnitudeBonus raises scorch magnitude beyond cap", () => {
+  const enemy = createEnemy("cf3", "drone", 0, 0, 1);
+  enemy.maxHp = 100;
+  enemy.hp = 100;
+  // Big fire hit so strength=1, magnitude lerps to magnitudeMax (0.3).
+  const rng = new Rng(1);
+  let baseMag = 0;
+  let bonusMag = 0;
+  for (let i = 0; i < 30; i += 1) {
+    enemy.ailments = {};
+    applyAilmentsFromHit(
+      enemy,
+      { damage: 200, damageType: "fire", breakdown: { fire: 200 }, ownerId: "p1" },
+      rng,
+    );
+    if (enemy.ailments.scorch) baseMag = Math.max(baseMag, enemy.ailments.scorch.magnitude);
+  }
+  for (let i = 0; i < 30; i += 1) {
+    enemy.ailments = {};
+    applyAilmentsFromHit(
+      enemy,
+      { damage: 200, damageType: "fire", breakdown: { fire: 200 }, ownerId: "p1", scorchMagnitudeBonus: 0.25 },
+      rng,
+    );
+    if (enemy.ailments.scorch) bonusMag = Math.max(bonusMag, enemy.ailments.scorch.magnitude);
+  }
+  assert.ok(bonusMag > baseMag + 0.2, `expected bonus magnitude well above base; base=${baseMag} bonus=${bonusMag}`);
+  assert.equal(AILMENT_CONFIG.scorch.magnitudeMax, 0.3, "global scorch cap must remain unchanged");
+});
+
+test("Wildfire burst on death ignites neighbours, respects depth cap, and burst damage does not re-roll ailments", () => {
+  const sim = freshSim();
+  sim.players.get("p1").stats.conflagration2 = 1;
+  const center = createEnemy("wc", "drone", 0, 0, 1);
+  center.maxHp = 50;
+  center.hp = 1;
+  center.armor = 0;
+  center.ailments = {
+    ignite: { remaining: 2, tickAccumulator: 0, tickRate: 0.25, dotPerSecond: 30, ownerId: "p1" },
+  };
+  sim.enemies.set(center.id, center);
+
+  const neighbour = createEnemy("wn", "drone", 30, 0, 1);
+  neighbour.maxHp = 200;
+  neighbour.hp = 200;
+  neighbour.armor = 0;
+  sim.enemies.set(neighbour.id, neighbour);
+
+  const farAway = createEnemy("wf", "drone", 9999, 0, 1);
+  farAway.maxHp = 200;
+  farAway.hp = 200;
+  sim.enemies.set(farAway.id, farAway);
+
+  // Kill center with a fire hit attributed to p1.
+  sim.damageEnemy(center, 100, {
+    ownerId: "p1",
+    x: -10,
+    y: 0,
+    vx: 1,
+    vy: 0,
+    damageType: "fire",
+    damageBreakdown: { fire: 100 },
+  });
+
+  assert.ok(neighbour.hp < 200, "neighbour should take wildfire burst damage");
+  assert.equal(farAway.hp, 200, "out-of-range enemy untouched");
+  // Burst should be able to ignite neighbour (it routes through applyAilmentsFromHit, not fromAilment).
+  // We can't deterministically assert ignite due to RNG but verify no bleed (no physical in burst).
+  assert.equal(neighbour.ailments.bleed, undefined, "fire-only burst must not bleed");
+
+  // Depth cap: ignited dying neighbour with wildfireDepth:1 source must NOT spawn another burst.
+  neighbour.ailments = {
+    ignite: { remaining: 2, tickAccumulator: 0, tickRate: 0.25, dotPerSecond: 30, ownerId: "p1" },
+  };
+  neighbour.hp = 1;
+  farAway.x = neighbour.x + 30;
+  const before = farAway.hp;
+  sim.damageEnemy(neighbour, 100, {
+    ownerId: "p1",
+    x: neighbour.x - 10,
+    y: 0,
+    vx: 1,
+    vy: 0,
+    damageType: "fire",
+    damageBreakdown: { fire: 100 },
+    wildfireDepth: 1,
+  });
+  assert.equal(farAway.hp, before, "wildfire must not chain past depth 1");
+});

@@ -29,6 +29,7 @@ export function createPlayer(id, x = 0, y = 0) {
     xpPickupsCollected: 0,
     cooldown: 0,
     plagueLanceCooldown: 0,
+    pyreBrandCooldown: 0,
     shotCount: 0,
     ownedUpgrades: new Set(),
     upgradeStacks: new Map(),
@@ -110,6 +111,10 @@ export function createPlayer(id, x = 0, y = 0) {
       virulence1: 0,
       virulence2: 0,
       virulence3: 0,
+      pyreBrandLevel: 0,
+      conflagration1: 0,
+      conflagration2: 0,
+      conflagration3: 0,
     },
   };
 }
