@@ -10,8 +10,10 @@ import {
   getAilmentDamageTakenMultiplier,
   isFrozen,
   AILMENT_CONFIG,
+  validateAilmentConfig,
 } from "../src/ailments.js";
 import { Rng } from "../src/math.js";
+import { UPGRADE_POOL } from "../src/upgrades.js";
 
 function freshSim() {
   const sim = new GameSimulation({ seed: 7 });
@@ -589,3 +591,108 @@ test("Contagion burst on death damages neighbours and respects depth cap", () =>
   });
   assert.equal(farAway.hp, before, "contagion must not chain past depth 1");
 });
+
+test("Tempest Coil hits roll shock and sap on lightning breakdown", () => {
+  const enemy = createEnemy("tc1", "drone", 0, 0, 1);
+  enemy.maxHp = 200;
+  enemy.hp = 200;
+  const rng = new Rng(13);
+  let shocked = 0;
+  let sapped = 0;
+  for (let i = 0; i < 60; i += 1) {
+    enemy.ailments = {};
+    applyAilmentsFromHit(
+      enemy,
+      { damage: 30, damageType: "lightning", breakdown: { lightning: 30 }, ownerId: "p1" },
+      rng,
+    );
+    if (enemy.ailments.shock) shocked += 1;
+    if (enemy.ailments.sap) sapped += 1;
+    assert.equal(enemy.ailments.ignite, undefined, "lightning never ignites");
+    assert.equal(enemy.ailments.bleed, undefined, "lightning never bleeds");
+  }
+  assert.ok(shocked > 5, `expected some shocks, got ${shocked}`);
+  assert.ok(sapped > 5, `expected some saps, got ${sapped}`);
+});
+
+test("shockMagnitudeBonus hit field boosts the rolled shock magnitude", () => {
+  const enemy = createEnemy("tc2", "drone", 0, 0, 1);
+  enemy.maxHp = 200;
+  enemy.hp = 200;
+  function meanShockMagnitude(extra) {
+    let total = 0;
+    let count = 0;
+    const rng = new Rng(7);
+    for (let i = 0; i < 200; i += 1) {
+      enemy.ailments = {};
+      applyAilmentsFromHit(
+        enemy,
+        { damage: 30, damageType: "lightning", breakdown: { lightning: 30 }, ownerId: "p1", ...extra },
+        rng,
+      );
+      const s = enemy.ailments.shock;
+      if (s) {
+        total += s.magnitude || 0;
+        count += 1;
+      }
+    }
+    return count ? total / count : 0;
+  }
+  const base = meanShockMagnitude({});
+  const boosted = meanShockMagnitude({ shockMagnitudeBonus: 0.25 });
+  assert.ok(boosted > base + 0.15, `expected boosted shock mag (got base=${base} boosted=${boosted})`);
+  // Cap: huge bonus must clamp at 1.0.
+  const clamped = meanShockMagnitude({ shockMagnitudeBonus: 5 });
+  assert.ok(clamped <= 1 + 1e-9, `shock magnitude must clamp <= 1, got ${clamped}`);
+  assert.equal(AILMENT_CONFIG.shock.magnitudeMax, 0.5, "global config must remain unchanged");
+});
+
+test("Tempest Coil chain hops do not re-roll ailments (fromAilment path)", () => {
+  const sim = freshSim();
+  const player = sim.players.get("p1");
+  player.x = 0;
+  player.y = 0;
+  player.cooldown = 999;
+  player.tempestCoilCooldown = 0;
+  // Apply weapon + tier I + tier II so chain is large and hits are juicy.
+  for (const id of ["tempest-coil", "overcharge-1", "overcharge-2"]) {
+    UPGRADE_POOL.find((u) => u.id === id).apply(player);
+  }
+  const primary = createEnemy("p", "drone", 0, 0, 1);
+  primary.maxHp = 9999;
+  primary.hp = 9999;
+  sim.enemies.set(primary.id, primary);
+  // Place chain neighbours close together.
+  const neighbours = [];
+  for (let i = 0; i < 4; i += 1) {
+    const e = createEnemy(`n${i}`, "drone", 80 + i * 50, 0, 1);
+    e.maxHp = 9999;
+    e.hp = 9999;
+    sim.enemies.set(e.id, e);
+    neighbours.push(e);
+  }
+  const proj = {
+    ownerId: player.id,
+    damage: 30,
+    weaponKind: "tempestCoil",
+    tempestArcs: 4,
+    tempestRange: 190,
+    tempestDamageMultiplier: 0.7,
+  };
+  sim.tempestCoilChainDamage(proj, primary);
+  // The chain hops are explicitly fromAilment:true, so by contract no chain
+  // hop may have planted shock/sap/etc. The primary received no projectile
+  // hit in this test (we only call the chain helper), so it too should be
+  // ailment-free.
+  assert.equal(primary.ailments.shock, undefined, "primary should not be re-shocked by chain");
+  for (const n of neighbours) {
+    assert.equal(n.ailments.shock, undefined, "chain hops must not apply shock");
+    assert.equal(n.ailments.sap, undefined, "chain hops must not apply sap");
+  }
+});
+
+test("validateAilmentConfig still passes after Tempest Coil additions", () => {
+  const errors = validateAilmentConfig();
+  assert.deepEqual(errors, []);
+});
+

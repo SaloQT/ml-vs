@@ -185,6 +185,27 @@ export const UPGRADE_POOL = [
     }),
     "virulence-2",
   ),
+  statUpgrade("tempest-coil", "Tempest Coil", "rare", "Equip a slow lightning coil that pierces 3 enemies and arcs to nearby foes, shocking and sapping them.", 1, (player) => {
+    player.stats.tempestCoilLevel += 1;
+  }),
+  requiresUpgrade(
+    statUpgrade("overcharge-1", "Overcharge I — Static Buildup", "rare", "Tempest Coil arcs +2 more times and each arc hits 15% harder.", 1, (player) => {
+      player.stats.overcharge1 = 1;
+    }),
+    "tempest-coil",
+  ),
+  requiresUpgrade(
+    statUpgrade("overcharge-2", "Overcharge II — Conductive Surge", "epic", "Tempest Coil hits apply much stronger shock and sap to the primary target.", 1, (player) => {
+      player.stats.overcharge2 = 1;
+    }),
+    "overcharge-1",
+  ),
+  requiresUpgrade(
+    statUpgrade("overcharge-3", "Overcharge III — Static Discharge", "epic", "When a shocked enemy you killed dies, it releases a single lightning burst that damages nearby foes.", 1, (player) => {
+      player.stats.overcharge3 = 1;
+    }),
+    "overcharge-2",
+  ),
 ];
 
 function requiresUpgrade(upgrade, requiredId) {

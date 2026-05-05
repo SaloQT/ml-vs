@@ -29,6 +29,7 @@ export function createPlayer(id, x = 0, y = 0) {
     xpPickupsCollected: 0,
     cooldown: 0,
     plagueLanceCooldown: 0,
+    tempestCoilCooldown: 0,
     shotCount: 0,
     ownedUpgrades: new Set(),
     upgradeStacks: new Map(),
@@ -110,6 +111,10 @@ export function createPlayer(id, x = 0, y = 0) {
       virulence1: 0,
       virulence2: 0,
       virulence3: 0,
+      tempestCoilLevel: 0,
+      overcharge1: 0,
+      overcharge2: 0,
+      overcharge3: 0,
     },
   };
 }
@@ -292,6 +297,12 @@ export function createProjectile(id, ownerId, x, y, vx, vy, damage, radius = 5, 
     splashCenterBonusPerTarget: weapon.splashCenterBonusPerTarget ?? 0,
     droneArcDamagePerDrone: weapon.droneArcDamagePerDrone ?? 0,
     droneArcRange: weapon.droneArcRange ?? 0,
+    weaponKind: weapon.weaponKind ?? null,
+    tempestArcs: weapon.tempestArcs ?? 0,
+    tempestRange: weapon.tempestRange ?? 0,
+    tempestDamageMultiplier: weapon.tempestDamageMultiplier ?? 0,
+    shockMagnitudeBonus: weapon.shockMagnitudeBonus ?? 0,
+    sapMagnitudeBonus: weapon.sapMagnitudeBonus ?? 0,
     hitEnemyIds: [],
   };
 }

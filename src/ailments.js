@@ -187,8 +187,16 @@ export function applyAilmentsFromHit(enemy, hit, rng) {
     const chance = lerp(cfg.chanceFloor, cfg.chanceMax, strength);
     if (rng.next() >= chance) continue;
     const duration = lerp(cfg.durationMin, cfg.durationMax, strength);
-    const magnitude =
+    let magnitude =
       cfg.magnitudeMin !== undefined ? lerp(cfg.magnitudeMin, cfg.magnitudeMax, strength) : 0;
+    if (name === "shock" && hit.shockMagnitudeBonus > 0) {
+      // Additive bonus, capped at 1.0 so shocked enemies never take >2x damage.
+      magnitude = Math.min(1, magnitude + hit.shockMagnitudeBonus);
+    }
+    if (name === "sap" && hit.sapMagnitudeBonus > 0) {
+      // Additive bonus, capped at 0.6 so sap can never zero out enemy damage.
+      magnitude = Math.min(0.6, magnitude + hit.sapMagnitudeBonus);
+    }
     const dotTotal = cfg.dotFraction ? typedDamage * cfg.dotFraction : 0;
     const dotPerSecond = duration > 0 ? dotTotal / duration : 0;
     applyAilment(enemy, name, cfg, {

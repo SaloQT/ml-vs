@@ -130,3 +130,162 @@ test("Virulence chain requires its prerequisite", () => {
   assert.equal(v3.requires, "virulence-2");
   assert.equal(lance.requires, undefined);
 });
+
+test("Tempest Coil fires a lightning projectile with chain metadata", () => {
+  const simulation = new GameSimulation({ seed: 17 });
+  const player = resetArena(simulation);
+  upgrade("tempest-coil").apply(player);
+  player.cooldown = 999;
+  player.tempestCoilCooldown = 0;
+  simulation.inputs.set(player.id, { moveX: 0, moveY: 0, aimX: 1, aimY: 0 });
+  simulation.updatePlayers(0.016);
+  const projs = [...simulation.projectiles.values()];
+  assert.equal(projs.length, 1);
+  const p = projs[0];
+  assert.equal(p.weaponKind, "tempestCoil");
+  assert.equal(p.damageType, "lightning");
+  assert.equal(p.pierce, 3);
+  assert.equal(p.tempestArcs, 2);
+  assert.ok(p.tempestRange > 0);
+  assert.ok(p.tempestDamageMultiplier > 0);
+  assert.equal(p.shockMagnitudeBonus, 0);
+});
+
+test("Overcharge chain requires its prerequisite", () => {
+  const o1 = upgrade("overcharge-1");
+  const o2 = upgrade("overcharge-2");
+  const o3 = upgrade("overcharge-3");
+  const coil = upgrade("tempest-coil");
+  assert.equal(o1.requires, "tempest-coil");
+  assert.equal(o2.requires, "overcharge-1");
+  assert.equal(o3.requires, "overcharge-2");
+  assert.equal(coil.requires, undefined);
+});
+
+test("Overcharge I deepens the Tempest Coil chain and scales hop damage", () => {
+  const simulation = new GameSimulation({ seed: 21 });
+  const player = resetArena(simulation);
+  upgrade("tempest-coil").apply(player);
+  upgrade("overcharge-1").apply(player);
+  player.cooldown = 999;
+  player.tempestCoilCooldown = 0;
+  simulation.inputs.set(player.id, { moveX: 0, moveY: 0, aimX: 1, aimY: 0 });
+  simulation.updatePlayers(0.016);
+  const p = [...simulation.projectiles.values()][0];
+  assert.equal(p.tempestArcs, 4);
+  assert.ok(p.tempestDamageMultiplier > 0.6, `expected boosted hop dmg, got ${p.tempestDamageMultiplier}`);
+});
+
+test("Overcharge II adds shock+sap magnitude bonuses to Tempest Coil hits", () => {
+  const simulation = new GameSimulation({ seed: 22 });
+  const player = resetArena(simulation);
+  upgrade("tempest-coil").apply(player);
+  upgrade("overcharge-1").apply(player);
+  upgrade("overcharge-2").apply(player);
+  player.cooldown = 999;
+  player.tempestCoilCooldown = 0;
+  simulation.inputs.set(player.id, { moveX: 0, moveY: 0, aimX: 1, aimY: 0 });
+  simulation.updatePlayers(0.016);
+  const p = [...simulation.projectiles.values()][0];
+  assert.ok(p.shockMagnitudeBonus > 0);
+  assert.ok(p.sapMagnitudeBonus > 0);
+});
+
+test("Tempest Coil chain caps depth and never re-hits the same target", () => {
+  const simulation = new GameSimulation({ seed: 31 });
+  const player = resetArena(simulation);
+  upgrade("tempest-coil").apply(player);
+  upgrade("overcharge-1").apply(player);
+  // Place a string of targets within tempestRange of each other.
+  const enemies = [];
+  for (let i = 0; i < 8; i += 1) {
+    const e = createEnemy(`chain-${i}`, "drone", 100 + i * 60, 0, 1);
+    e.maxHp = 9999;
+    e.hp = 9999;
+    simulation.enemies.set(e.id, e);
+    enemies.push(e);
+  }
+  // Build a fake projectile and detonate the chain directly.
+  const proj = {
+    ownerId: player.id,
+    damage: 30,
+    weaponKind: "tempestCoil",
+    tempestArcs: 4,
+    tempestRange: 190,
+    tempestDamageMultiplier: 0.7,
+  };
+  const before = enemies.map((e) => e.hp);
+  simulation.tempestCoilChainDamage(proj, enemies[0]);
+  const damaged = enemies.filter((e, i) => e.hp < before[i]);
+  // First enemy is the primary; chain should hit at most 4 additional, all
+  // distinct, and never re-hit the primary.
+  assert.ok(damaged.length <= 4, `chain hit ${damaged.length} additional, expected <=4`);
+  assert.equal(enemies[0].hp, before[0], "chain must not re-hit the primary target");
+  // No target should have lost more than one hop's worth of HP.
+  for (let i = 1; i < enemies.length; i += 1) {
+    const hpDelta = before[i] - enemies[i].hp;
+    const oneHop = proj.damage * proj.tempestDamageMultiplier;
+    assert.ok(hpDelta <= oneHop + 0.001, `enemy ${i} took ${hpDelta}, more than one hop ${oneHop}`);
+  }
+});
+
+test("Overcharge III triggers a single static discharge on shocked-kill", () => {
+  const simulation = new GameSimulation({ seed: 41 });
+  const player = resetArena(simulation);
+  upgrade("tempest-coil").apply(player);
+  upgrade("overcharge-1").apply(player);
+  upgrade("overcharge-2").apply(player);
+  upgrade("overcharge-3").apply(player);
+  const center = createEnemy("dc-center", "drone", 0, 0, 1);
+  center.maxHp = 50;
+  center.hp = 1;
+  center.ailments = { shock: { remaining: 2, magnitude: 0.4, ownerId: player.id } };
+  simulation.enemies.set(center.id, center);
+  const neighbour = createEnemy("dc-near", "drone", 40, 0, 1);
+  neighbour.maxHp = 200;
+  neighbour.hp = 200;
+  simulation.enemies.set(neighbour.id, neighbour);
+  const farAway = createEnemy("dc-far", "drone", 9999, 0, 1);
+  farAway.maxHp = 200;
+  farAway.hp = 200;
+  simulation.enemies.set(farAway.id, farAway);
+  // Kill center with a lightning hit attributed to player.
+  simulation.damageEnemy(center, 100, {
+    ownerId: player.id,
+    x: -10,
+    y: 0,
+    vx: 1,
+    vy: 0,
+    damageType: "lightning",
+    damageBreakdown: { lightning: 100 },
+  });
+  assert.ok(neighbour.hp < 200, "neighbour should take static discharge damage");
+  assert.equal(farAway.hp, 200, "out-of-range enemy should be untouched");
+});
+
+test("Static discharge does not fire on un-shocked deaths", () => {
+  const simulation = new GameSimulation({ seed: 42 });
+  const player = resetArena(simulation);
+  upgrade("tempest-coil").apply(player);
+  upgrade("overcharge-1").apply(player);
+  upgrade("overcharge-2").apply(player);
+  upgrade("overcharge-3").apply(player);
+  const center = createEnemy("nd-center", "drone", 0, 0, 1);
+  center.maxHp = 50;
+  center.hp = 1;
+  center.ailments = {};
+  simulation.enemies.set(center.id, center);
+  const neighbour = createEnemy("nd-near", "drone", 40, 0, 1);
+  neighbour.maxHp = 200;
+  neighbour.hp = 200;
+  simulation.enemies.set(neighbour.id, neighbour);
+  simulation.damageEnemy(center, 100, {
+    ownerId: player.id,
+    x: -10,
+    y: 0,
+    vx: 1,
+    vy: 0,
+    damageType: "physical",
+  });
+  assert.equal(neighbour.hp, 200, "no shock => no discharge");
+});
