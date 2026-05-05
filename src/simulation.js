@@ -113,6 +113,8 @@ export class GameSimulation {
     this.pendingUpgradeChoices = [];
     this.players = new Map();
     this.enemies = new Map();
+    this._enemyArr = [];
+    this._enemyArrDirty = false;
     this.projectiles = new Map();
     this.pickups = new Map();
     this.effects = new Map();
@@ -167,6 +169,49 @@ export class GameSimulation {
     this._targetingCache = buildTargetingCache(this.targeting.primaryWeapon);
   }
 
+  // Maintain this._enemyArr in lockstep with this.enemies (Map).
+  // Insertion order is preserved so iteration matches Map.values() exactly,
+  // which is determinism-critical (lowest-numericId tie-breaks etc).
+  // Deletion uses tombstones (enemy._removed = true); compaction is lazy.
+  _addEnemy(enemy) {
+    this.enemies.set(enemy.id, enemy);
+    this._enemyArr.push(enemy);
+  }
+  _removeEnemy(id) {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    e._removed = true;
+    this.enemies.delete(id);
+    this._enemyArrDirty = true;
+  }
+  _compactEnemyArr() {
+    if (this._enemyArrDirty) {
+      const arr = this._enemyArr;
+      let w = 0;
+      for (let i = 0; i < arr.length; i += 1) {
+        const e = arr[i];
+        if (!e._removed) {
+          if (w !== i) arr[w] = e;
+          w += 1;
+        }
+      }
+      arr.length = w;
+      this._enemyArrDirty = false;
+    }
+    // Self-heal: tests and external code may mutate this.enemies (Map) directly
+    // and skip _addEnemy/_removeEnemy. Detect length divergence and resync from
+    // the Map. Insertion order is preserved since Map iteration is insertion-
+    // ordered and we just re-fill the array.
+    if (this._enemyArr.length !== this.enemies.size) {
+      const arr = this._enemyArr;
+      arr.length = 0;
+      for (const e of this.enemies.values()) {
+        e._removed = false;
+        arr.push(e);
+      }
+    }
+  }
+
   step(dt) {
     if (this.state !== "playing") return;
     this.tick += 1;
@@ -216,7 +261,7 @@ export class GameSimulation {
       wave: this.wave,
       localPlayerId: this.localPlayerId,
       players: Array.from(this.players.values()),
-      enemies: Array.from(this.enemies.values()),
+      enemies: (this._compactEnemyArr(), this._enemyArr),
       projectiles: Array.from(this.projectiles.values()),
       pickups: Array.from(this.pickups.values()),
       effects: Array.from(this.effects.values()),
@@ -558,7 +603,8 @@ export class GameSimulation {
   }
 
   primaryTargetFor(player) {
-    return selectTarget(player, [...this.enemies.values()], this.targeting.primaryWeapon, this.rng);
+    this._compactEnemyArr();
+    return selectTarget(player, this._enemyArr, this.targeting.primaryWeapon, this.rng);
   }
 
   canFirePrimaryWeapon(player) {
@@ -642,7 +688,7 @@ export class GameSimulation {
         { affixes },
       );
       this.applyEnemyScaling(enemy);
-      this.enemies.set(enemy.id, enemy);
+      this._addEnemy(enemy);
     }
     this.spawnTimer = Math.max(0.28, (1.7 - this.wave * 0.08) / Math.sqrt(spawnMultiplier));
   }
@@ -685,7 +731,7 @@ export class GameSimulation {
     const target = this.rng.pick(alivePlayers);
     if (!target) return null;
     const enemy = this.createRankedEnemy(definition, "elite", target, this.rng.range(620, 780));
-    this.enemies.set(enemy.id, enemy);
+    this._addEnemy(enemy);
     return enemy;
   }
 
@@ -699,7 +745,7 @@ export class GameSimulation {
       if (!target) return null;
       enemy = this.createRankedEnemy(definition, "boss", target, this.rng.range(760, 940));
     }
-    this.enemies.set(enemy.id, enemy);
+    this._addEnemy(enemy);
     if (!this.headless) {
       const effectId = this.entityId();
       this.effects.set(effectId, createEffect(effectId, "bossSpawnBurst", enemy.x, enemy.y, enemy.radius + 90, 0.45));
@@ -759,9 +805,13 @@ export class GameSimulation {
     if (!alivePlayers.length) return;
     const singleTarget = alivePlayers.length === 1 ? alivePlayers[0] : null;
     const decay = Math.pow(0.86, dt * 60);
-    for (const enemy of this.enemies.values()) {
+    this._compactEnemyArr();
+    const enemyArr = this._enemyArr;
+    for (let ei = 0; ei < enemyArr.length; ei += 1) {
+      const enemy = enemyArr[ei];
+      if (enemy._removed) continue;
       this.updateEnemyStatusDamage(enemy, dt);
-      if (!this.enemies.has(enemy.id)) continue;
+      if (enemy._removed || !this.enemies.has(enemy.id)) continue;
       enemy.siphonFor = Math.max(0, (enemy.siphonFor ?? 0) - dt);
       enemy.armoredFlashFor = Math.max(0, (enemy.armoredFlashFor ?? 0) - dt);
       if (enemy.bossTelegraph && this.elapsed - enemy.bossTelegraph.startedAt > enemy.bossTelegraph.duration) {
@@ -951,7 +1001,7 @@ export class GameSimulation {
     minion.hitVx = direction.x * 70;
     minion.hitVy = direction.y * 70;
     this.applyEnemyScaling(minion);
-    this.enemies.set(minion.id, minion);
+    this._addEnemy(minion);
     this._addEnemyToGrid(minion);
   }
 
@@ -1208,7 +1258,7 @@ export class GameSimulation {
       this.triggerShatterBurst(enemy, source);
     }
     if (enemy.hp > 0 || !this.enemies.has(enemy.id)) return;
-    this.enemies.delete(enemy.id);
+    this._removeEnemy(enemy.id);
     let owner = null;
     let firstPlayer = null;
     const ownerId = source?.ownerId;
@@ -1282,7 +1332,10 @@ export class GameSimulation {
     const buckets = this._gridBuckets;
     const pool = this._gridBucketPool;
     const occupied = this._gridOccupiedKeys;
-    for (const enemy of this.enemies.values()) {
+    this._compactEnemyArr();
+    const enemyArr = this._enemyArr;
+    for (let ei = 0; ei < enemyArr.length; ei += 1) {
+      const enemy = enemyArr[ei];
       // Lazily compute the parsed numeric id once per enemy. Determinism-
       // critical paths sort grid candidates by this value to mimic the
       // ascending-insertion-order semantics of Map.values().
@@ -1383,7 +1436,10 @@ export class GameSimulation {
       let wardens = this._wardenList;
       if (!wardens) wardens = this._wardenList = [];
       wardens.length = 0;
-      for (const other of this.enemies.values()) {
+      this._compactEnemyArr();
+      const enemyArr = this._enemyArr;
+      for (let ei = 0; ei < enemyArr.length; ei += 1) {
+        const other = enemyArr[ei];
         if (other.type === "warden" && other.hp > 0) wardens.push(other);
       }
       this._wardenListTick = this.tick;
@@ -2121,7 +2177,7 @@ export class GameSimulation {
       child.hitVx = Math.cos(angle) * 80;
       child.hitVy = Math.sin(angle) * 80;
       this.applyEnemyScaling(child);
-      this.enemies.set(child.id, child);
+      this._addEnemy(child);
       this._addEnemyToGrid(child);
     }
   }
@@ -2182,9 +2238,13 @@ export class GameSimulation {
   cleanupFarEntities() {
     const limitSq = 1800 * 1800;
     const players = this.players;
-    // Map iteration tolerates deletion of the current entry, so we can drop
-    // far enemies in place instead of staging an id list and re-iterating.
-    for (const enemy of this.enemies.values()) {
+    // Tombstone-deletion: _removeEnemy marks the entry and defers compaction,
+    // so iterating the parallel array with _removed skip is safe.
+    this._compactEnemyArr();
+    const enemyArr = this._enemyArr;
+    for (let ei = 0; ei < enemyArr.length; ei += 1) {
+      const enemy = enemyArr[ei];
+      if (enemy._removed) continue;
       let close = false;
       for (const player of players.values()) {
         const dx = player.x - enemy.x;
@@ -2194,7 +2254,7 @@ export class GameSimulation {
           break;
         }
       }
-      if (!close) this.enemies.delete(enemy.id);
+      if (!close) this._removeEnemy(enemy.id);
     }
   }
 
@@ -2265,8 +2325,9 @@ export class GameSimulation {
 
   _selectPrimaryTargetFast(player) {
     const cache = this._targetingCache;
+    this._compactEnemyArr();
     if (!cache.fastPath) {
-      return selectTarget(player, [...this.enemies.values()], this.targeting.primaryWeapon, this.rng);
+      return selectTarget(player, this._enemyArr, this.targeting.primaryWeapon, this.rng);
     }
     const allowedTypes = cache.allowedTypes;
     const hasTypeFilter = allowedTypes !== null;
@@ -2275,7 +2336,9 @@ export class GameSimulation {
     const py = player.y;
     let best = null;
     let bestDist = Infinity;
-    for (const enemy of this.enemies.values()) {
+    const enemyArr = this._enemyArr;
+    for (let ei = 0; ei < enemyArr.length; ei += 1) {
+      const enemy = enemyArr[ei];
       if (enemy.hp <= 0) continue;
       if (hasTypeFilter && !allowedTypes.has(enemy.type)) continue;
       const dx = enemy.x - px;
