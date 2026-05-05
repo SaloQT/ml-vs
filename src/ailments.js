@@ -182,13 +182,19 @@ export function applyAilmentsFromHit(enemy, hit, rng) {
     if (name === "poison" && hit.poisonDotMultiplier > 0 && hit.poisonDotMultiplier !== 1) {
       typedDamage *= hit.poisonDotMultiplier;
     }
+    if (name === "ignite" && hit.igniteDotMultiplier > 0 && hit.igniteDotMultiplier !== 1) {
+      typedDamage *= hit.igniteDotMultiplier;
+    }
     const strength = computeRollStrength(cfg, typedDamage, enemy.maxHp, enemy.rank);
     if (strength <= 0) continue;
     const chance = lerp(cfg.chanceFloor, cfg.chanceMax, strength);
     if (rng.next() >= chance) continue;
     const duration = lerp(cfg.durationMin, cfg.durationMax, strength);
-    const magnitude =
+    let magnitude =
       cfg.magnitudeMin !== undefined ? lerp(cfg.magnitudeMin, cfg.magnitudeMax, strength) : 0;
+    if (name === "scorch" && hit.scorchMagnitudeBonus > 0 && magnitude > 0) {
+      magnitude += hit.scorchMagnitudeBonus;
+    }
     const dotTotal = cfg.dotFraction ? typedDamage * cfg.dotFraction : 0;
     const dotPerSecond = duration > 0 ? dotTotal / duration : 0;
     applyAilment(enemy, name, cfg, {

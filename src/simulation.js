@@ -437,6 +437,13 @@ export class GameSimulation {
           player.plagueLanceCooldown = 1 / (0.55 * this.playerFireRate(player) / player.stats.fireRate);
         }
       }
+      if (player.stats.pyreBrandLevel > 0) {
+        player.pyreBrandCooldown = (player.pyreBrandCooldown ?? 0) - dt;
+        if (player.pyreBrandCooldown <= 0) {
+          this.firePyreBrand(player, { x: aimDx, y: aimDy });
+          player.pyreBrandCooldown = 1 / (0.6 * this.playerFireRate(player) / player.stats.fireRate);
+        }
+      }
     }
   }
 
@@ -1063,6 +1070,8 @@ export class GameSimulation {
       const ownerPlayer = source.ownerId ? this.players.get(source.ownerId) : null;
       const poisonDotMultiplier = ownerPlayer?.stats?.virulence1 > 0 ? 1.5 : 1;
       const poisonMaxStacks = ownerPlayer?.stats?.virulence3 > 0 ? 12 : 0;
+      const igniteDotMultiplier = ownerPlayer?.stats?.conflagration1 > 0 ? 1.4 : 1;
+      const scorchMagnitudeBonus = ownerPlayer?.stats?.conflagration3 > 0 ? 0.25 : 0;
       applyAilmentsFromHit(
         enemy,
         {
@@ -1072,6 +1081,8 @@ export class GameSimulation {
           ownerId: source.ownerId ?? null,
           poisonDotMultiplier,
           poisonMaxStacks,
+          igniteDotMultiplier,
+          scorchMagnitudeBonus,
         },
         this.rng,
       );
@@ -1097,6 +1108,7 @@ export class GameSimulation {
       this.triggerKillVolley(enemy, owner);
     }
     this.triggerContagionBurst(enemy, owner, source);
+    this.triggerWildfireBurst(enemy, owner, source);
     this.triggerEnemyDeathAffixes(enemy, owner);
     this.spawnSplitChildren(enemy);
     const pickup = this.createEnemyDrop(enemy, owner);
@@ -1469,6 +1481,61 @@ export class GameSimulation {
         contagionDepth: 1,
       });
     }
+  }
+
+  triggerWildfireBurst(enemy, owner, source) {
+    if (!owner || !(owner.stats.conflagration2 > 0)) return;
+    if (source && (source.wildfireDepth ?? 0) >= 1) return;
+    if (!enemy.ailments?.ignite || !(enemy.ailments.ignite.remaining > 0)) return;
+    const igniteDps = enemy.ailments.ignite.dotPerSecond ?? 0;
+    if (igniteDps <= 0) return;
+    const burstDamage = igniteDps * 0.8;
+    const radius = 80;
+    const radiusSq = radius * radius;
+    if (!this.headless) {
+      const effectId = this.entityId();
+      this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, radius, 0.32));
+    }
+    for (const other of this.enemies.values()) {
+      if (other.id === enemy.id || other.hp <= 0) continue;
+      if (distanceSq(enemy.x, enemy.y, other.x, other.y) > radiusSq) continue;
+      this.damageEnemy(other, burstDamage, {
+        ownerId: owner.id,
+        x: enemy.x,
+        y: enemy.y,
+        vx: other.x - enemy.x,
+        vy: other.y - enemy.y,
+        damageType: "fire",
+        damageBreakdown: { fire: burstDamage },
+        fromAilment: false,
+        wildfireDepth: 1,
+      });
+    }
+  }
+
+  firePyreBrand(player, aimDirection = null) {
+    const direction = normalize(aimDirection?.x ?? player.facingX, aimDirection?.y ?? player.facingY);
+    const baseDamage = 28;
+    const breakdown = { physical: 8, fire: 20 };
+    const projectile = createProjectile(
+      this.entityId(),
+      player.id,
+      player.x + direction.x * 26,
+      player.y + direction.y * 26,
+      direction.x * 480,
+      direction.y * 480,
+      baseDamage,
+      Math.max(5, player.stats.projectileRadius + 1),
+      Math.max(player.stats.projectileTtl, 1.5),
+      {
+        pierce: 2,
+        color: "#ffb347",
+        glowColor: "rgba(255, 122, 58, 0.55)",
+        damageType: "fire",
+        damageBreakdown: breakdown,
+      },
+    );
+    this.projectiles.set(projectile.id, projectile);
   }
 
   firePlagueLance(player, aimDirection = null) {

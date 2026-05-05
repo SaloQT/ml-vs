@@ -120,6 +120,32 @@ test("Plague Lance fires a chaos-breakdown projectile", () => {
   assert.equal(projs[0].pierce, 3);
 });
 
+test("Pyre Brand fires a fire-breakdown projectile that pierces 2", () => {
+  const simulation = new GameSimulation({ seed: 8 });
+  const player = resetArena(simulation);
+  upgrade("pyre-brand").apply(player);
+  player.cooldown = 999;
+  player.pyreBrandCooldown = 0;
+  simulation.inputs.set(player.id, { moveX: 0, moveY: 0, aimX: 1, aimY: 0 });
+  simulation.updatePlayers(0.016);
+  const projs = [...simulation.projectiles.values()];
+  assert.equal(projs.length, 1);
+  assert.equal(projs[0].damageType, "fire");
+  assert.deepEqual(projs[0].damageBreakdown, { physical: 8, fire: 20 });
+  assert.equal(projs[0].pierce, 2);
+});
+
+test("Conflagration chain requires its prerequisite", () => {
+  const c1 = upgrade("conflagration-1");
+  const c2 = upgrade("conflagration-2");
+  const c3 = upgrade("conflagration-3");
+  const brand = upgrade("pyre-brand");
+  assert.equal(c1.requires, "pyre-brand");
+  assert.equal(c2.requires, "conflagration-1");
+  assert.equal(c3.requires, "conflagration-2");
+  assert.equal(brand.requires, undefined);
+});
+
 test("Virulence chain requires its prerequisite", () => {
   const v1 = upgrade("virulence-1");
   const v2 = upgrade("virulence-2");
