@@ -182,7 +182,7 @@ test("ricochet projectile redirects to a fresh nearby target with reduced damage
   assert.equal(projectile.damage, 10);
   assert.equal(projectile.ricochetBounces, 0);
   assert.ok(projectile.vx > 0);
-  assert.deepEqual(projectile.hitEnemyIds, ["first"]);
+  assert.deepEqual([...projectile.hitEnemyIds], ["first"]);
 
   simulation.updateProjectiles(0.08);
 

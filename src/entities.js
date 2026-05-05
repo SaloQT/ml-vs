@@ -320,7 +320,7 @@ export function createProjectile(id, ownerId, x, y, vx, vy, damage, radius = 5, 
     tempestDamageMultiplier: weapon.tempestDamageMultiplier ?? 0,
     shockMagnitudeBonus: weapon.shockMagnitudeBonus ?? 0,
     sapMagnitudeBonus: weapon.sapMagnitudeBonus ?? 0,
-    hitEnemyIds: [],
+    hitEnemyIds: new Set(),
   };
 }
 

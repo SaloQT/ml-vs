@@ -985,7 +985,7 @@ export class GameSimulation {
       const py = projectile.y;
       const pr = projectile.radius;
       const hitIds = projectile.hitEnemyIds;
-      const hitIdsLen = hitIds ? hitIds.length : 0;
+      const hitIdsLen = hitIds ? hitIds.size : 0;
       this._queryEnemiesInRadius(px, py, pr + PROJECTILE_QUERY_PAD, out);
       // Find the lowest-numericId candidate in collision. Mirrors the
       // original Map-iteration order which yielded the smallest-insertion-
@@ -994,7 +994,7 @@ export class GameSimulation {
       let hitNumericId = Infinity;
       for (let i = 0; i < out.length; i += 1) {
         const enemy = out[i];
-        if (hitIdsLen > 0 && hitIds.indexOf(enemy.id) >= 0) continue;
+        if (hitIdsLen > 0 && hitIds.has(enemy.id)) continue;
         const nid = enemy._numericId;
         if (nid >= hitNumericId) continue;
         const hitDistance = pr + enemy.radius;
@@ -1007,7 +1007,7 @@ export class GameSimulation {
       }
       if (hit) {
         const enemy = hit;
-        if (hitIds) hitIds.push(enemy.id);
+        if (hitIds) hitIds.add(enemy.id);
         this.applyBrittleCrit(projectile, enemy);
         this.damageEnemy(enemy, projectile.damage, projectile);
         this.applyProjectileStatuses(projectile, enemy);
@@ -1666,7 +1666,7 @@ export class GameSimulation {
     const owner = this.players.get(projectile.ownerId);
     const droneCount = owner?.stats.drones ?? 0;
     if (droneCount <= 0) return;
-    const targets = this.nearestChainTargets(firstEnemy, new Set(projectile.hitEnemyIds ?? [firstEnemy.id]), projectile.droneArcRange, droneCount);
+    const targets = this.nearestChainTargets(firstEnemy, projectile.hitEnemyIds ?? new Set([firstEnemy.id]), projectile.droneArcRange, droneCount);
     if (!targets.length) return;
     const damage = projectile.damage * projectile.droneArcDamagePerDrone;
     for (let i = 0; i < droneCount; i += 1) {
@@ -1683,7 +1683,7 @@ export class GameSimulation {
 
   ricochetProjectile(projectile, firstEnemy) {
     if (!projectile.ricochetBounces || !projectile.ricochetRange || projectile.ricochetDamageMultiplier <= 0) return false;
-    const target = this.nearestChainTarget(firstEnemy, new Set(projectile.hitEnemyIds ?? []), projectile.ricochetRange);
+    const target = this.nearestChainTarget(firstEnemy, projectile.hitEnemyIds ?? new Set(), projectile.ricochetRange);
     if (!target) return false;
     const direction = normalize(target.x - firstEnemy.x, target.y - firstEnemy.y);
     projectile.x = firstEnemy.x + direction.x * (firstEnemy.radius + projectile.radius + 2);

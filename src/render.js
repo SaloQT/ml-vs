@@ -13,6 +13,8 @@ import {
 } from "./assets.js";
 import { clamp } from "./math.js";
 
+const TWO_PI = TWO_PI;
+
 export class Renderer {
   constructor(canvas, options = {}) {
     this.canvas = canvas;
@@ -188,7 +190,7 @@ export class Renderer {
     ctx.fillStyle = active ? "rgba(255, 210, 74, 0.12)" : "rgba(100, 217, 255, 0.08)";
     ctx.lineWidth = active ? 4 : 3;
     ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.arc(0, 0, radius, 0, TWO_PI);
     ctx.fill();
     ctx.stroke();
     ctx.rotate(elapsed * 0.9);
@@ -244,7 +246,7 @@ export class Renderer {
       ctx.fillStyle = star.color;
       ctx.globalAlpha = star.alpha;
       ctx.beginPath();
-      ctx.arc(x + camera.x, y + camera.y, star.radius / this.camera.scale, 0, Math.PI * 2);
+      ctx.arc(x + camera.x, y + camera.y, star.radius / this.camera.scale, 0, TWO_PI);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
@@ -307,7 +309,7 @@ export class Renderer {
 
     ctx.fillStyle = "#edf7ff";
     ctx.beginPath();
-    ctx.arc(2, 0, 7, 0, Math.PI * 2);
+    ctx.arc(2, 0, 7, 0, TWO_PI);
     ctx.fill();
 
     ctx.fillStyle = "#ffc857";
@@ -325,19 +327,19 @@ export class Renderer {
     const ctx = this.ctx;
     for (const player of snapshot.players) {
       for (let i = 0; i < player.stats.drones; i += 1) {
-        const angle = snapshot.elapsed * (2.2 + i * 0.22) + (Math.PI * 2 * i) / player.stats.drones;
+        const angle = snapshot.elapsed * (2.2 + i * 0.22) + (TWO_PI * i) / player.stats.drones;
         const x = player.x + Math.cos(angle) * 78;
         const y = player.y + Math.sin(angle) * 78;
         const pulse = 1 + Math.sin(snapshot.elapsed * 9 + i) * 0.08;
         if (this.drawSprite("orbitalDrone", x, y, 36 * pulse, 38 * pulse, snapshot.elapsed * 4 + i)) continue;
         ctx.fillStyle = "#ff5b79";
         ctx.beginPath();
-        ctx.arc(x, y, 11, 0, Math.PI * 2);
+        ctx.arc(x, y, 11, 0, TWO_PI);
         ctx.fill();
         ctx.strokeStyle = "rgba(255, 91, 121, 0.45)";
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(x, y, 21, 0, Math.PI * 2);
+        ctx.arc(x, y, 21, 0, TWO_PI);
         ctx.stroke();
       }
     }
@@ -373,7 +375,7 @@ export class Renderer {
       } else if (enemy.type === "bulwark") {
         ctx.rect(enemy.x - enemy.radius * 0.85, enemy.y + bob - enemy.radius * 0.85, enemy.radius * 1.7, enemy.radius * 1.7);
       } else {
-        ctx.arc(enemy.x, enemy.y + bob, enemy.radius, 0, Math.PI * 2);
+        ctx.arc(enemy.x, enemy.y + bob, enemy.radius, 0, TWO_PI);
       }
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.24)";
@@ -391,7 +393,7 @@ export class Renderer {
       ctx.globalAlpha = hitFlash * 0.72;
       ctx.fillStyle = enemy.type === "bruiser" || enemy.type === "bulwark" ? "#f4b7ff" : "#ffffff";
       ctx.beginPath();
-      ctx.arc(enemy.x, enemy.y + bob, enemy.radius * (1.25 + hitFlash * 0.35), 0, Math.PI * 2);
+      ctx.arc(enemy.x, enemy.y + bob, enemy.radius * (1.25 + hitFlash * 0.35), 0, TWO_PI);
       ctx.fill();
       ctx.restore();
     }
@@ -462,7 +464,7 @@ export class Renderer {
     ctx.setLineDash([12, 7]);
     ctx.lineDashOffset = -elapsed * 32;
     ctx.beginPath();
-    ctx.arc(enemy.x, enemy.y + bob, radius, 0, Math.PI * 2);
+    ctx.arc(enemy.x, enemy.y + bob, radius, 0, TWO_PI);
     ctx.stroke();
     ctx.restore();
   }
@@ -485,12 +487,12 @@ export class Renderer {
     ctx.setLineDash([18, 8, 4, 8]);
     ctx.lineDashOffset = -elapsed * 24;
     ctx.beginPath();
-    ctx.arc(enemy.x, enemy.y + bob, radius, 0, Math.PI * 2);
+    ctx.arc(enemy.x, enemy.y + bob, radius, 0, TWO_PI);
     ctx.stroke();
     ctx.globalAlpha = 0.18;
     ctx.fillStyle = bossAuraColor(enemy);
     ctx.beginPath();
-    ctx.arc(enemy.x, enemy.y + bob, radius * 0.92, 0, Math.PI * 2);
+    ctx.arc(enemy.x, enemy.y + bob, radius * 0.92, 0, TWO_PI);
     ctx.fill();
     ctx.restore();
   }
@@ -508,7 +510,7 @@ export class Renderer {
     ctx.translate(enemy.x, enemy.y + bob);
     ctx.rotate(elapsed * 0.6);
     for (let i = 0; i < visibleSegments; i += 1) {
-      const start = (Math.PI * 2 * i) / 6;
+      const start = (TWO_PI * i) / 6;
       ctx.globalAlpha = 0.55 + i * 0.055;
       ctx.beginPath();
       ctx.arc(0, 0, radius, start, start + Math.PI / 5);
@@ -518,7 +520,7 @@ export class Renderer {
       ctx.globalAlpha = (telegraph - 0.72) / 0.28;
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.arc(0, 0, enemy.radius * 0.92, 0, Math.PI * 2);
+      ctx.arc(0, 0, enemy.radius * 0.92, 0, TWO_PI);
       ctx.fill();
     }
     ctx.restore();
@@ -534,13 +536,13 @@ export class Renderer {
     ctx.setLineDash([6, 4]);
     ctx.lineDashOffset = -elapsed * 38;
     ctx.beginPath();
-    ctx.arc(0, 0, enemy.radius + 18, 0, Math.PI * 2);
+    ctx.arc(0, 0, enemy.radius + 18, 0, TWO_PI);
     ctx.stroke();
     ctx.lineWidth = 2;
     ctx.setLineDash([3, 9]);
     ctx.lineDashOffset = elapsed * 58;
     ctx.beginPath();
-    ctx.arc(0, 0, enemy.radius + 8, 0, Math.PI * 2);
+    ctx.arc(0, 0, enemy.radius + 8, 0, TWO_PI);
     ctx.stroke();
     ctx.restore();
     if ((enemy.siphonFor ?? 0) > 0 && Number.isFinite(enemy.siphonTargetX) && Number.isFinite(enemy.siphonTargetY)) {
@@ -561,7 +563,7 @@ export class Renderer {
         ctx.globalAlpha = 0.9 * (1 - t);
         ctx.fillStyle = "#25d6ff";
         ctx.beginPath();
-        ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+        ctx.arc(x, y, 2.2, 0, TWO_PI);
         ctx.fill();
       }
       ctx.restore();
@@ -587,7 +589,7 @@ export class Renderer {
       ctx.strokeStyle = `rgba(124, 136, 255, ${0.75 * (1 - ringProgress)})`;
       ctx.lineWidth = 6 * (1 - ringProgress);
       ctx.beginPath();
-      ctx.arc(0, 0, enemy.radius + 60 * ringProgress, 0, Math.PI * 2);
+      ctx.arc(0, 0, enemy.radius + 60 * ringProgress, 0, TWO_PI);
       ctx.stroke();
     }
     ctx.restore();
@@ -604,7 +606,7 @@ export class Renderer {
     for (let i = 0; i < 12; i += 1) {
       const jitter = seededNoise(numericId(enemy.id), i, Math.floor(elapsed * 30));
       ctx.globalAlpha = 0.4 + jitter * 0.6;
-      const angle = (Math.PI * 2 * i) / 12 + Math.sin(elapsed * 4 + i) * 0.04;
+      const angle = (TWO_PI * i) / 12 + Math.sin(elapsed * 4 + i) * 0.04;
       ctx.beginPath();
       ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
       ctx.lineTo(Math.cos(angle) * (radius + 10), Math.sin(angle) * (radius + 10));
@@ -618,7 +620,7 @@ export class Renderer {
       ctx.globalAlpha = 1;
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      ctx.arc(0, 0, enemy.radius + 90, 0, Math.PI * 2);
+      ctx.arc(0, 0, enemy.radius + 90, 0, TWO_PI);
       ctx.fill();
     }
     ctx.restore();
@@ -636,19 +638,19 @@ export class Renderer {
       ctx.scale(1.08 / Math.max(0.4, squash), squash);
       ctx.fillStyle = "rgba(255, 154, 61, 0.88)";
       for (let i = 0; i < 3; i += 1) {
-        const angle = elapsed * Math.PI * 2 * 1.4 + (Math.PI * 2 * i) / 3;
+        const angle = elapsed * TWO_PI * 1.4 + (TWO_PI * i) / 3;
         drawShardGlyph(ctx, Math.cos(angle) * orbitRadius, Math.sin(angle) * orbitRadius, 5 + telegraph * 2, angle);
       }
     } else if (enemy.bossId === "siphon-prime") {
       ctx.globalCompositeOperation = "source-over";
       ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
       ctx.beginPath();
-      ctx.arc(0, 0, enemy.radius * 0.55, 0, Math.PI * 2);
+      ctx.arc(0, 0, enemy.radius * 0.55, 0, TWO_PI);
       ctx.fill();
       ctx.strokeStyle = "rgba(37, 214, 255, 0.72)";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(0, 0, enemy.radius * 0.55, 0, Math.PI * 2);
+      ctx.arc(0, 0, enemy.radius * 0.55, 0, TWO_PI);
       ctx.stroke();
     } else if (enemy.bossId === "bastion-bulwark") {
       const slam = bossTelegraphProgress(enemy, "slam", elapsed, 1);
@@ -673,7 +675,7 @@ export class Renderer {
       const burst = bossTelegraphProgress(enemy, "burst", elapsed, 1);
       const orbitRadius = enemy.radius * (0.7 - burst * 0.45);
       for (let i = 0; i < 3; i += 1) {
-        const angle = elapsed * Math.PI * 2 * (3 + burst * 3) + (Math.PI * 2 * i) / 3;
+        const angle = elapsed * TWO_PI * (3 + burst * 3) + (TWO_PI * i) / 3;
         const x = Math.cos(angle) * orbitRadius;
         const y = Math.sin(angle) * orbitRadius;
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, 8);
@@ -681,7 +683,7 @@ export class Renderer {
         gradient.addColorStop(1, "rgba(215, 255, 87, 0)");
         ctx.fillStyle = gradient;
         ctx.beginPath();
-        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.arc(x, y, 8, 0, TWO_PI);
         ctx.fill();
       }
     }
@@ -699,11 +701,11 @@ export class Renderer {
     ctx.strokeStyle = hexToRgba(telegraph.color, 0.85 * (1 - progress * 0.35));
     ctx.lineWidth = 3 - progress * 2;
     ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.arc(0, 0, radius, 0, TWO_PI);
     ctx.stroke();
     ctx.lineWidth = 2;
     for (let i = 0; i < 6; i += 1) {
-      const angle = (Math.PI * 2 * i) / 6 + elapsed * 0.18;
+      const angle = (TWO_PI * i) / 6 + elapsed * 0.18;
       const r = 160 - ease * 140;
       const x = Math.cos(angle) * r;
       const y = Math.sin(angle) * r;
@@ -751,20 +753,20 @@ export class Renderer {
       ctx.setLineDash(style.dash);
       ctx.lineDashOffset = -elapsed * style.spin * style.dashDirection;
       ctx.beginPath();
-      ctx.arc(enemy.x, enemy.y + bob, radius, 0, Math.PI * 2);
+      ctx.arc(enemy.x, enemy.y + bob, radius, 0, TWO_PI);
       ctx.stroke();
       ctx.fillStyle = style.dot;
       for (let dot = 0; dot < style.dots; dot += 1) {
-        const angle = elapsed * style.spin * 0.08 * style.dashDirection + (Math.PI * 2 * dot) / style.dots;
+        const angle = elapsed * style.spin * 0.08 * style.dashDirection + (TWO_PI * dot) / style.dots;
         ctx.beginPath();
-        ctx.arc(enemy.x + Math.cos(angle) * radius, enemy.y + bob + Math.sin(angle) * radius, 2.4, 0, Math.PI * 2);
+        ctx.arc(enemy.x + Math.cos(angle) * radius, enemy.y + bob + Math.sin(angle) * radius, 2.4, 0, TWO_PI);
         ctx.fill();
       }
       if (volatileWarning) {
-        ctx.globalAlpha = Math.max(0, Math.sin(elapsed * Math.PI * 22));
+        ctx.globalAlpha = Math.max(0, Math.sin(elapsed * TWO_PI2));
         ctx.fillStyle = "#ffffff";
         ctx.beginPath();
-        ctx.arc(enemy.x, enemy.y + bob, enemy.radius * 0.4, 0, Math.PI * 2);
+        ctx.arc(enemy.x, enemy.y + bob, enemy.radius * 0.4, 0, TWO_PI);
         ctx.fill();
       }
       ctx.restore();
@@ -805,7 +807,7 @@ export class Renderer {
       ctx.strokeStyle = style.fill;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(pickup.x, pickup.y + bob, pickup.radius + 4, 0, Math.PI * 2);
+      ctx.arc(pickup.x, pickup.y + bob, pickup.radius + 4, 0, TWO_PI);
       ctx.stroke();
       ctx.restore();
       return;
@@ -815,7 +817,7 @@ export class Renderer {
     ctx.lineWidth = 2;
     ctx.beginPath();
     if (style.shape === "circle") {
-      ctx.arc(pickup.x, pickup.y + bob, pickup.radius, 0, Math.PI * 2);
+      ctx.arc(pickup.x, pickup.y + bob, pickup.radius, 0, TWO_PI);
     } else {
       ctx.rect(pickup.x - pickup.radius, pickup.y + bob - pickup.radius, pickup.radius * 2, pickup.radius * 2);
     }
@@ -854,14 +856,14 @@ export class Renderer {
       this.ctx.strokeStyle = `rgba(255, 200, 87, ${0.82 * (1 - progress)})`;
       this.ctx.lineWidth = 3;
       this.ctx.beginPath();
-      this.ctx.arc(effect.x, effect.y, size * 0.5, 0, Math.PI * 2);
+      this.ctx.arc(effect.x, effect.y, size * 0.5, 0, TWO_PI);
       this.ctx.stroke();
     } else if (effect.type === "bossSpawnBurst") {
       this.drawGlow(effect.x, effect.y, size, "rgba(255, 255, 255, 0.36)");
       this.ctx.strokeStyle = `rgba(255, 255, 255, ${0.7 * (1 - progress)})`;
       this.ctx.lineWidth = 5 * (1 - progress);
       this.ctx.beginPath();
-      this.ctx.arc(effect.x, effect.y, size * 0.5, 0, Math.PI * 2);
+      this.ctx.arc(effect.x, effect.y, size * 0.5, 0, TWO_PI);
       this.ctx.stroke();
     } else {
       const style = collectionEffectStyle(effect.type);
@@ -869,7 +871,7 @@ export class Renderer {
       this.ctx.strokeStyle = style.stroke;
       this.ctx.lineWidth = 4 * alpha;
       this.ctx.beginPath();
-      this.ctx.arc(effect.x, effect.y, size * 0.42, 0, Math.PI * 2);
+      this.ctx.arc(effect.x, effect.y, size * 0.42, 0, TWO_PI);
       this.ctx.stroke();
     }
     this.ctx.restore();
@@ -885,7 +887,7 @@ export class Renderer {
     ctx.strokeStyle = `rgba(143, 243, 255, ${alpha * 0.82})`;
     ctx.lineWidth = 3 * alpha;
     ctx.beginPath();
-    ctx.arc(effect.x, effect.y, radius, 0, Math.PI * 2);
+    ctx.arc(effect.x, effect.y, radius, 0, TWO_PI);
     ctx.stroke();
     this.drawGlow(effect.x, effect.y, radius * 1.5, `rgba(143, 243, 255, ${alpha * 0.42})`);
     ctx.restore();
@@ -903,7 +905,7 @@ export class Renderer {
     ctx.strokeStyle = `rgba(255, 225, 170, ${alpha * 0.8})`;
     ctx.lineWidth = 5 * alpha;
     ctx.beginPath();
-    ctx.arc(effect.x, effect.y, radius, 0, Math.PI * 2);
+    ctx.arc(effect.x, effect.y, radius, 0, TWO_PI);
     ctx.stroke();
     ctx.restore();
   }
@@ -1109,7 +1111,7 @@ export class Renderer {
 
   emitRadialParticles(effect, count, primaryColor, secondaryColor) {
     for (let i = 0; i < count; i += 1) {
-      const angle = (Math.PI * 2 * i) / count + this.randomRange(-0.08, 0.08);
+      const angle = (TWO_PI * i) / count + this.randomRange(-0.08, 0.08);
       const speed = this.randomRange(110, 320);
       const ttl = this.randomRange(0.32, 0.84);
       this.particles.push({
@@ -1131,7 +1133,7 @@ export class Renderer {
     let whole = Math.floor(amount);
     if (this.random() < amount - whole) whole += 1;
     for (let i = 0; i < whole; i += 1) {
-      const angle = this.random() * Math.PI * 2;
+      const angle = this.random() * TWO_PI;
       const speed = this.randomRange(0.25, 1) * options.spread;
       const ttl = options.ttl * this.randomRange(0.72, 1.2);
       this.particles.push({
@@ -1157,7 +1159,7 @@ export class Renderer {
       ctx.globalAlpha = alpha * (particle.alpha ?? 1);
       ctx.fillStyle = particle.color;
       ctx.beginPath();
-      ctx.arc(particle.x, particle.y, particle.size * (0.55 + alpha * 0.45), 0, Math.PI * 2);
+      ctx.arc(particle.x, particle.y, particle.size * (0.55 + alpha * 0.45), 0, TWO_PI);
       ctx.fill();
     }
     ctx.restore();
@@ -1340,7 +1342,7 @@ export class Renderer {
           ? `rgba(255, 91, 121, ${0.7 + Math.sin(t * 4 + i) * 0.25})`
           : "rgba(255, 91, 121, 0.16)";
         ctx.beginPath();
-        ctx.arc(dotsX + i * 14, dotY, 4, 0, Math.PI * 2);
+        ctx.arc(dotsX + i * 14, dotY, 4, 0, TWO_PI);
         ctx.fill();
         if (lit) {
           ctx.save();
@@ -1830,7 +1832,7 @@ export class Renderer {
       fg.addColorStop(1, "rgba(255, 210, 74, 0)");
       ctx.fillStyle = fg;
       ctx.beginPath();
-      ctx.arc(x + fillW, y + height / 2, 24, 0, Math.PI * 2);
+      ctx.arc(x + fillW, y + height / 2, 24, 0, TWO_PI);
       ctx.fill();
       ctx.restore();
     }
@@ -2053,7 +2055,7 @@ export class Renderer {
     gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
     this.ctx.fillStyle = gradient;
     this.ctx.beginPath();
-    this.ctx.arc(x, y, radius, 0, Math.PI * 2);
+    this.ctx.arc(x, y, radius, 0, TWO_PI);
     this.ctx.fill();
   }
 
@@ -2174,7 +2176,7 @@ function drawShardGlyph(ctx, x, y, radius, rotation) {
 function polygonPath(ctx, x, y, radius, sides, rotation = 0) {
   ctx.beginPath();
   for (let i = 0; i < sides; i += 1) {
-    const angle = rotation + (Math.PI * 2 * i) / sides;
+    const angle = rotation + (TWO_PI * i) / sides;
     const px = x + Math.cos(angle) * radius;
     const py = y + Math.sin(angle) * radius;
     if (i === 0) ctx.moveTo(px, py);
