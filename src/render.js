@@ -13,7 +13,7 @@ import {
 } from "./assets.js";
 import { clamp } from "./math.js";
 
-const TWO_PI = TWO_PI;
+const TWO_PI = Math.PI * 2;
 
 export class Renderer {
   constructor(canvas, options = {}) {
