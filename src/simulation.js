@@ -183,6 +183,7 @@ export class GameSimulation {
     e._removed = true;
     this.enemies.delete(id);
     this._enemyArrDirty = true;
+    if (e._gridKey !== undefined) this._removeEnemyFromGrid(e);
   }
   _compactEnemyArr() {
     if (this._enemyArrDirty) {
@@ -226,7 +227,7 @@ export class GameSimulation {
     // 290+ enemies. Enemies spawned mid-step (split children, boss minions)
     // are inserted into the live grid by _addEnemyToGrid so subsequent
     // queries still find them.
-    this._rebuildEnemyGrid();
+    this._updateEnemyGridIncremental();
     this.updateEnemies(dt);
     this.updateProjectiles(dt);
     this.updateDrones(dt);
@@ -949,11 +950,12 @@ export class GameSimulation {
             });
           }
         }
-        const knockback = 20 + (target.stats.contactKnockback ?? 0);
+        const ck = target.stats.contactKnockback ?? 0;
+        const knockback = 20 + ck;
         enemy.x -= dirX * knockback;
         enemy.y -= dirY * knockback;
-        enemy.hitVx -= dirX * (target.stats.contactKnockback ?? 0) * 3.4;
-        enemy.hitVy -= dirY * (target.stats.contactKnockback ?? 0) * 3.4;
+        enemy.hitVx -= dirX * ck * 3.4;
+        enemy.hitVy -= dirY * ck * 3.4;
       }
     }
   }
@@ -1329,9 +1331,6 @@ export class GameSimulation {
   _rebuildEnemyGrid() {
     this._ensureGridStorage();
     this._resetEnemyGrid();
-    const buckets = this._gridBuckets;
-    const pool = this._gridBucketPool;
-    const occupied = this._gridOccupiedKeys;
     this._compactEnemyArr();
     const enemyArr = this._enemyArr;
     for (let ei = 0; ei < enemyArr.length; ei += 1) {
@@ -1350,17 +1349,15 @@ export class GameSimulation {
         }
         enemy._numericId = nid;
       }
+      // Defensive: _resetEnemyGrid wiped buckets but enemy._gridKey may still
+      // point at the old (now empty/pooled) bucket. Clear so _addEnemyToBucket
+      // doesn't double-track.
+      enemy._gridKey = undefined;
+      enemy._bucketIndex = undefined;
       const cx = ((enemy.x + 8192) | 0) >> 7;
       const cy = ((enemy.y + 8192) | 0) >> 7;
       const key = (cy << 8) | cx;
-      let bucket = buckets[key];
-      if (!bucket) {
-        bucket = pool.length ? pool.pop() : [];
-        buckets[key] = bucket;
-        occupied.push(key);
-      }
-      bucket.push(enemy);
-      enemy._gridKey = key;
+      this._addEnemyToBucket(enemy, key);
     }
   }
 
@@ -1382,6 +1379,12 @@ export class GameSimulation {
     const cx = ((enemy.x + 8192) | 0) >> 7;
     const cy = ((enemy.y + 8192) | 0) >> 7;
     const key = (cy << 8) | cx;
+    this._addEnemyToBucket(enemy, key);
+  }
+
+  // Append an enemy to the bucket for `key`, creating it via the pool if
+  // needed. Records enemy._bucketIndex so removals can be O(1) swap-and-pop.
+  _addEnemyToBucket(enemy, key) {
     const buckets = this._gridBuckets;
     let bucket = buckets[key];
     if (!bucket) {
@@ -1390,8 +1393,80 @@ export class GameSimulation {
       buckets[key] = bucket;
       this._gridOccupiedKeys.push(key);
     }
+    enemy._bucketIndex = bucket.length;
     bucket.push(enemy);
     enemy._gridKey = key;
+  }
+
+  // O(1) remove via swap-and-pop. Bucket internal order is therefore not
+  // insertion-stable -- determinism-critical query callers already sort by
+  // _numericId before consuming candidates (see comment on _queryEnemiesInRadius).
+  _removeEnemyFromGrid(enemy) {
+    if (!this._gridBuckets) return;
+    const key = enemy._gridKey;
+    if (key === undefined) return;
+    const bucket = this._gridBuckets[key];
+    if (!bucket) {
+      enemy._gridKey = undefined;
+      enemy._bucketIndex = undefined;
+      return;
+    }
+    const idx = enemy._bucketIndex;
+    const last = bucket.length - 1;
+    if (idx !== last) {
+      const moved = bucket[last];
+      bucket[idx] = moved;
+      moved._bucketIndex = idx;
+    }
+    bucket.length = last;
+    if (last === 0) {
+      this._gridBuckets[key] = undefined;
+      this._gridBucketPool.push(bucket);
+      const occ = this._gridOccupiedKeys;
+      // Linear search is fine: occupied keys are bounded (~ active cell count)
+      // and removals only happen on death + cell crossings.
+      for (let i = 0; i < occ.length; i += 1) {
+        if (occ[i] === key) {
+          occ[i] = occ[occ.length - 1];
+          occ.length -= 1;
+          break;
+        }
+      }
+    }
+    enemy._gridKey = undefined;
+    enemy._bucketIndex = undefined;
+  }
+
+  // Incremental per-tick grid update. Replaces _rebuildEnemyGrid in step().
+  // For each live enemy, if its current cell key differs from its cached
+  // _gridKey, swap-and-pop from the old bucket and append to the new one.
+  // First-tick (or post-_resetEnemyGrid) state: all enemies have _gridKey
+  // undefined and are appended fresh.
+  _updateEnemyGridIncremental() {
+    this._ensureGridStorage();
+    this._compactEnemyArr();
+    const enemyArr = this._enemyArr;
+    for (let ei = 0; ei < enemyArr.length; ei += 1) {
+      const enemy = enemyArr[ei];
+      if (enemy._numericId === undefined) {
+        const idStr = enemy.id;
+        let nid = 0;
+        if (typeof idStr === "string") {
+          for (let k = 0; k < idStr.length; k += 1) {
+            const c = idStr.charCodeAt(k);
+            if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
+          }
+        }
+        enemy._numericId = nid;
+      }
+      const cx = ((enemy.x + 8192) | 0) >> 7;
+      const cy = ((enemy.y + 8192) | 0) >> 7;
+      const newKey = (cy << 8) | cx;
+      const oldKey = enemy._gridKey;
+      if (newKey === oldKey) continue;
+      if (oldKey !== undefined) this._removeEnemyFromGrid(enemy);
+      this._addEnemyToBucket(enemy, newKey);
+    }
   }
 
   // Push every enemy whose current position is within `radius` of (x, y)
