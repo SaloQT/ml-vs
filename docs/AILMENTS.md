@@ -99,6 +99,25 @@ time by passing optional fields on the `hit` object into
 - `hit.poisonMaxStacks` — overrides the per-call `maxStacks` for poison
   only. Used by Virulence III to raise the cap from 8 to 12 for the
   player's poisons. Other sources still use the global cap.
+- `hit.brittleMagnitudeBonus` — additive bonus (clamped to 1) added to
+  the rolled brittle `magnitude`. Used by Glaciation III (Cryoclasm) to
+  push brittle's crit conversion above its baseline range.
+
+Cold-archetype weapons (Rime Lance) also use **projectile/source-level
+flags** read by `damageEnemy` rather than `applyAilmentsFromHit`:
+
+- `source.frostbite` + `source.permafrostBonus` — multiplicative damage
+  bonus applied when the target carries any cold-tag ailment
+  (chill / freeze / brittle). Used by Glaciation I (Permafrost).
+- `source.shatterpoint` + `source.shatterRadius` + `source.shatterDamage`
+  + `source.shatterCritMultiplier` — when set, hits on a frozen-or-brittle
+  target spawn a cold AoE burst that re-enters `damageEnemy` with
+  `fromAilment: true` so it cannot recursively roll ailments. Brittle is
+  not boss-gated, so the brittle path is the freeze-immune payoff hook
+  for bosses/elites. Used by Glaciation II (Shatterpoint) and
+  Glaciation III (Cryoclasm doubles the burst on critical hits).
+- `source.cryoclasmBrittleBonus` — threaded into `applyAilmentsFromHit`
+  as `hit.brittleMagnitudeBonus` for the lance's own brittle rolls.
 
 `damageEnemy` looks up the owning player from `source.ownerId` and threads
 these fields through automatically, so weapon/contagion/drone code paths

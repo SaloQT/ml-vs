@@ -195,6 +195,9 @@ export function applyAilmentsFromHit(enemy, hit, rng) {
     if (name === "scorch" && hit.scorchMagnitudeBonus > 0 && magnitude > 0) {
       magnitude += hit.scorchMagnitudeBonus;
     }
+    if (name === "brittle" && hit.brittleMagnitudeBonus > 0) {
+      magnitude = Math.min(1, magnitude + hit.brittleMagnitudeBonus);
+    }
     const dotTotal = cfg.dotFraction ? typedDamage * cfg.dotFraction : 0;
     const dotPerSecond = duration > 0 ? dotTotal / duration : 0;
     applyAilment(enemy, name, cfg, {
