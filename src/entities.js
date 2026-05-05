@@ -28,6 +28,7 @@ export function createPlayer(id, x = 0, y = 0) {
     pickupSpeedBurstFor: 0,
     xpPickupsCollected: 0,
     cooldown: 0,
+    plagueLanceCooldown: 0,
     shotCount: 0,
     ownedUpgrades: new Set(),
     upgradeStacks: new Map(),
@@ -105,6 +106,10 @@ export function createPlayer(id, x = 0, y = 0) {
       markDuration: 0,
       emergencyShield: 0,
       ramDamage: 0,
+      plagueLanceLevel: 0,
+      virulence1: 0,
+      virulence2: 0,
+      virulence3: 0,
     },
   };
 }
@@ -143,6 +148,7 @@ export function createEnemy(id, type, x, y, wave, options = {}) {
     hitFlash: 0,
     hitVx: 0,
     hitVy: 0,
+    ailments: {},
   };
 
   for (const affix of affixes) applyEnemyAffix(enemy, affix);
@@ -260,11 +266,13 @@ export function createProjectile(id, ownerId, x, y, vx, vy, damage, radius = 5, 
     radius,
     damage,
     ttl,
-    initialSpeed: Math.hypot(vx, vy),
+    initialSpeed: Math.sqrt(vx * vx + vy * vy),
     acceleration: weapon.acceleration ?? 0,
     maxSpeedMultiplier: weapon.maxSpeedMultiplier ?? 1,
     isCritical: Boolean(weapon.isCritical),
     executeThreshold: weapon.executeThreshold ?? 0,
+    damageType: weapon.damageType ?? "physical",
+    damageBreakdown: weapon.damageBreakdown ?? null,
     burnDps: weapon.burnDps ?? 0,
     burnDuration: weapon.burnDuration ?? 0,
     markDamageTakenMultiplier: weapon.markDamageTakenMultiplier ?? 0,

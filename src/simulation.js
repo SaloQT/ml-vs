@@ -4,6 +4,15 @@ import { clamp, distanceSq, normalize, Rng } from "./math.js";
 import { applyMetaProgress, normalizeMetaProgress } from "./metaProgression.js";
 import { createTargetingConfig, mergeTargetingConfig, selectTarget } from "./targeting.js";
 import { pickUpgradeChoices, UPGRADE_POOL } from "./upgrades.js";
+import {
+  applyAilmentsFromHit,
+  updateAilments,
+  getAilmentSpeedMultiplier,
+  getAilmentDamageTakenMultiplier,
+  getAilmentOutgoingDamageMultiplier,
+  getAilmentCritChanceBonus,
+  isFrozen,
+} from "./ailments.js";
 
 const ELITE_ROTATION = [
   {
@@ -137,13 +146,15 @@ export class GameSimulation {
   }
 
   applyInput(playerId, input) {
-    const current = this.inputs.get(playerId) ?? {};
-    this.inputs.set(playerId, {
-      moveX: clamp(input.moveX ?? current.moveX ?? 0, -1, 1),
-      moveY: clamp(input.moveY ?? current.moveY ?? 0, -1, 1),
-      aimX: clamp(input.aimX ?? current.aimX ?? 1, -1, 1),
-      aimY: clamp(input.aimY ?? current.aimY ?? 0, -1, 1),
-    });
+    let current = this.inputs.get(playerId);
+    if (!current) {
+      current = { moveX: 0, moveY: 0, aimX: 1, aimY: 0 };
+      this.inputs.set(playerId, current);
+    }
+    current.moveX = clamp(input.moveX ?? current.moveX ?? 0, -1, 1);
+    current.moveY = clamp(input.moveY ?? current.moveY ?? 0, -1, 1);
+    current.aimX = clamp(input.aimX ?? current.aimX ?? 1, -1, 1);
+    current.aimY = clamp(input.aimY ?? current.aimY ?? 0, -1, 1);
   }
 
   setTargetingConfig(targeting) {
@@ -346,7 +357,7 @@ export class GameSimulation {
       const input = this.inputs.get(player.id) ?? { moveX: 0, moveY: 0 };
       const mx = input.moveX;
       const my = input.moveY;
-      const moveLen = Math.hypot(mx, my);
+      const moveLen = Math.sqrt(mx * mx + my * my);
       const moveNx = moveLen ? mx / moveLen : 0;
       const moveNy = moveLen ? my / moveLen : 0;
       player.overdriveFor = Math.max(0, (player.overdriveFor ?? 0) - dt);
@@ -406,7 +417,7 @@ export class GameSimulation {
       const turnBlend = 1 - Math.exp(-10 * dt);
       const facingX = player.facingX + (aimDx - player.facingX) * turnBlend;
       const facingY = player.facingY + (aimDy - player.facingY) * turnBlend;
-      const facingLen = Math.hypot(facingX, facingY);
+      const facingLen = Math.sqrt(facingX * facingX + facingY * facingY);
       if (facingLen) {
         player.facingX = facingX / facingLen || 1;
         player.facingY = facingY / facingLen || 0;
@@ -418,6 +429,13 @@ export class GameSimulation {
       if (player.cooldown <= 0) {
         this.fireVolley(player, { x: aimDx, y: aimDy });
         player.cooldown = 0.42 / this.playerFireRate(player);
+      }
+      if (player.stats.plagueLanceLevel > 0) {
+        player.plagueLanceCooldown = (player.plagueLanceCooldown ?? 0) - dt;
+        if (player.plagueLanceCooldown <= 0) {
+          this.firePlagueLance(player, { x: aimDx, y: aimDy });
+          player.plagueLanceCooldown = 1 / (0.55 * this.playerFireRate(player) / player.stats.fireRate);
+        }
       }
     }
   }
@@ -489,7 +507,9 @@ export class GameSimulation {
 
   rollWeaponDamage(player) {
     const crit = this.rng.next() < player.stats.critChance;
-    const speedRatio = Math.min(1, Math.hypot(player.vx ?? 0, player.vy ?? 0) / Math.max(1, this.playerSpeed(player)));
+    const pvx = player.vx ?? 0;
+    const pvy = player.vy ?? 0;
+    const speedRatio = Math.min(1, Math.sqrt(pvx * pvx + pvy * pvy) / Math.max(1, this.playerSpeed(player)));
     const velocityBonus = 1 + speedRatio * (player.stats.velocityDamageBonus ?? 0);
     return {
       damage: player.stats.damage * velocityBonus * (crit ? player.stats.critDamage : 1),
@@ -728,14 +748,23 @@ export class GameSimulation {
       this.updateEnemyPhase(enemy, target, dt);
       const tdx = target.x - enemy.x;
       const tdy = target.y - enemy.y;
-      const tlen = Math.hypot(tdx, tdy);
+      const tlen = Math.sqrt(tdx * tdx + tdy * tdy);
       let dirX = tlen ? tdx / tlen : 0;
       let dirY = tlen ? tdy / tlen : 0;
       let speedMultiplier = 1;
       if (enemy._hastedFlag === undefined) {
         enemy._hastedFlag =
           (enemy.affixes && enemy.affixes.indexOf("hasted") >= 0) || enemy.eliteAffix === "swift";
-        enemy._numericId = Number.parseInt(String(enemy.id).replace(/\D/g, ""), 10) || 0;
+        // enemy.id is "e<number>" — extract numeric tail without regex alloc.
+        const idStr = enemy.id;
+        let nid = 0;
+        if (typeof idStr === "string") {
+          for (let k = 0; k < idStr.length; k += 1) {
+            const c = idStr.charCodeAt(k);
+            if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
+          }
+        }
+        enemy._numericId = nid;
       }
       if (enemy.type === "charger") {
         enemy.chargeCooldown = Math.max(0, (enemy.chargeCooldown ?? 0) - dt);
@@ -757,7 +786,7 @@ export class GameSimulation {
         const weave = Math.sin(enemy.strafePhase + enemy._numericId * 0.37) * 0.42;
         const wx = dirX - dirY * weave;
         const wy = dirY + dirX * weave;
-        const wlen = Math.hypot(wx, wy);
+        const wlen = Math.sqrt(wx * wx + wy * wy);
         if (wlen) {
           dirX = wx / wlen;
           dirY = wy / wlen;
@@ -780,6 +809,8 @@ export class GameSimulation {
         speedMultiplier = 0.55;
       }
       if (enemy.type === "warden" && tlen < (enemy.rank === "elite" ? 310 : 260)) speedMultiplier = 0.74;
+      speedMultiplier *= getAilmentSpeedMultiplier(enemy);
+      if (isFrozen(enemy)) speedMultiplier = 0;
       const moveScale = enemy.speed * speedMultiplier * dt;
       enemy.x += dirX * moveScale + enemy.hitVx * dt;
       enemy.y += dirY * moveScale + enemy.hitVy * dt;
@@ -792,7 +823,8 @@ export class GameSimulation {
       const ddy = enemy.y - target.y;
       if (ddx * ddx + ddy * ddy <= hitDistance * hitDistance) {
         if (target.invulnerableFor <= 0) {
-          const incomingDamage = Math.max(1, enemy.damage - this.playerArmor(target));
+          const sapMultiplier = getAilmentOutgoingDamageMultiplier(enemy);
+          const incomingDamage = Math.max(1, enemy.damage * sapMultiplier - this.playerArmor(target));
           const result = this.damagePlayer(target, incomingDamage, PLAYER_BASE.invulnerability + target.stats.invulnerabilityBonus);
           if (result.absorbed > 0 && target.stats.ramDamage > 0) {
             this.damageEnemy(enemy, target.stats.ramDamage, {
@@ -889,11 +921,19 @@ export class GameSimulation {
         continue;
       }
 
+      const px = projectile.x;
+      const py = projectile.y;
+      const pr = projectile.radius;
+      const hitIds = projectile.hitEnemyIds;
+      const hitIdsLen = hitIds ? hitIds.length : 0;
       for (const enemy of this.enemies.values()) {
-        if (projectile.hitEnemyIds?.includes(enemy.id)) continue;
-        const hitDistance = projectile.radius + enemy.radius;
-        if (distanceSq(projectile.x, projectile.y, enemy.x, enemy.y) <= hitDistance * hitDistance) {
-          projectile.hitEnemyIds?.push(enemy.id);
+        if (hitIdsLen > 0 && hitIds.indexOf(enemy.id) >= 0) continue;
+        const hitDistance = pr + enemy.radius;
+        const dx = px - enemy.x;
+        const dy = py - enemy.y;
+        if (dx * dx + dy * dy <= hitDistance * hitDistance) {
+          if (hitIds) hitIds.push(enemy.id);
+          this.applyBrittleCrit(projectile, enemy);
           this.damageEnemy(enemy, projectile.damage, projectile);
           this.applyProjectileStatuses(projectile, enemy);
           this.splashProjectileDamage(projectile, enemy);
@@ -987,21 +1027,55 @@ export class GameSimulation {
   }
 
   damageEnemy(enemy, damage, source = null) {
-    const sourceDirection = source ? normalize(source.vx ?? enemy.x - source.x, source.vy ?? enemy.y - source.y) : { x: 0, y: 0 };
-    const hitX = source?.x ?? enemy.x;
-    const hitY = source?.y ?? enemy.y;
+    let dirX = 0;
+    let dirY = 0;
+    let hitX = enemy.x;
+    let hitY = enemy.y;
+    if (source) {
+      const svx = source.vx ?? enemy.x - source.x;
+      const svy = source.vy ?? enemy.y - source.y;
+      const slen = Math.sqrt(svx * svx + svy * svy);
+      if (slen) {
+        dirX = svx / slen;
+        dirY = svy / slen;
+      }
+      if (source.x !== undefined) hitX = source.x;
+      if (source.y !== undefined) hitY = source.y;
+    }
     const markedMultiplier = (enemy.markedFor ?? 0) > 0 ? 1 + (enemy.markedDamageTakenMultiplier ?? 0) : 1;
+    const damageType = source?.damageType ?? "physical";
+    const ailmentMultiplier = getAilmentDamageTakenMultiplier(enemy, damageType);
     const minimumDamage = source?.allowSubUnitDamage ? 0 : 1;
     const mitigation = source?.ignoreArmor ? 0 : (enemy.armor ?? 0) + this.enemyArmorAuraBonus(enemy);
-    const appliedDamage = Math.max(minimumDamage, damage * markedMultiplier - mitigation);
+    const appliedDamage = Math.max(minimumDamage, damage * markedMultiplier * ailmentMultiplier - mitigation);
     enemy.hp -= appliedDamage;
     if (source?.isCritical && source.executeThreshold > 0 && enemy.hp > 0 && enemy.hp <= enemy.maxHp * source.executeThreshold) {
       enemy.hp = 0;
     }
     enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.12);
-    enemy.hitVx = (enemy.hitVx ?? 0) + sourceDirection.x * 90;
-    enemy.hitVy = (enemy.hitVy ?? 0) + sourceDirection.y * 90;
-    this.spawnHitEffect(hitX, hitY, sourceDirection, appliedDamage, enemy.hp <= 0);
+    enemy.hitVx = (enemy.hitVx ?? 0) + dirX * 90;
+    enemy.hitVy = (enemy.hitVy ?? 0) + dirY * 90;
+    if (!this.headless) {
+      this.spawnHitEffect(hitX, hitY, { x: dirX, y: dirY }, appliedDamage, enemy.hp <= 0);
+    }
+    if (source && !source.fromAilment && appliedDamage > 0 && enemy.hp > 0) {
+      const breakdown = source.damageBreakdown ?? null;
+      const ownerPlayer = source.ownerId ? this.players.get(source.ownerId) : null;
+      const poisonDotMultiplier = ownerPlayer?.stats?.virulence1 > 0 ? 1.5 : 1;
+      const poisonMaxStacks = ownerPlayer?.stats?.virulence3 > 0 ? 12 : 0;
+      applyAilmentsFromHit(
+        enemy,
+        {
+          damage: appliedDamage,
+          damageType,
+          breakdown,
+          ownerId: source.ownerId ?? null,
+          poisonDotMultiplier,
+          poisonMaxStacks,
+        },
+        this.rng,
+      );
+    }
     if (enemy.hp > 0 || !this.enemies.has(enemy.id)) return;
     this.enemies.delete(enemy.id);
     let owner = null;
@@ -1022,6 +1096,7 @@ export class GameSimulation {
       }
       this.triggerKillVolley(enemy, owner);
     }
+    this.triggerContagionBurst(enemy, owner, source);
     this.triggerEnemyDeathAffixes(enemy, owner);
     this.spawnSplitChildren(enemy);
     const pickup = this.createEnemyDrop(enemy, owner);
@@ -1030,12 +1105,26 @@ export class GameSimulation {
 
   enemyArmorAuraBonus(enemy) {
     if (!this.enemies.has(enemy.id)) return 0;
-    let bonus = 0;
-    for (const other of this.enemies.values()) {
-      if (other.id === enemy.id || other.type !== "warden" || other.hp <= 0) continue;
-      if (distanceSq(enemy.x, enemy.y, other.x, other.y) <= 190 * 190) bonus = Math.max(bonus, 5);
+    // Refresh "any warden" hint per tick.
+    if (this._wardenHintTick !== this.tick) {
+      let hasWarden = false;
+      for (const other of this.enemies.values()) {
+        if (other.type === "warden" && other.hp > 0) { hasWarden = true; break; }
+      }
+      this._wardenHintTick = this.tick;
+      this._wardenHint = hasWarden;
     }
-    return bonus;
+    if (!this._wardenHint) return 0;
+    const ex = enemy.x;
+    const ey = enemy.y;
+    const eid = enemy.id;
+    for (const other of this.enemies.values()) {
+      if (other.type !== "warden" || other.hp <= 0 || other.id === eid) continue;
+      const dx = ex - other.x;
+      const dy = ey - other.y;
+      if (dx * dx + dy * dy <= 36100) return 5;
+    }
+    return 0;
   }
 
   playerArmor(player) {
@@ -1069,7 +1158,8 @@ export class GameSimulation {
     if (!this.headless) this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, enemy.volatileRadius, 0.36));
     for (const player of this.players.values()) {
       if (player.hp <= 0 || distanceSq(enemy.x, enemy.y, player.x, player.y) > enemy.volatileRadius ** 2) continue;
-      const incomingDamage = Math.max(1, enemy.volatileDamage - this.playerArmor(player));
+      const sapMultiplier = getAilmentOutgoingDamageMultiplier(enemy);
+      const incomingDamage = Math.max(1, enemy.volatileDamage * sapMultiplier - this.playerArmor(player));
       this.damagePlayer(player, incomingDamage, PLAYER_BASE.invulnerability * 0.5 + player.stats.invulnerabilityBonus);
     }
     if (owner) owner.scrap += 1;
@@ -1168,7 +1258,7 @@ export class GameSimulation {
 
   accelerateProjectile(projectile, dt) {
     if (!projectile.acceleration || projectile.maxSpeedMultiplier <= 1 || dt <= 0) return;
-    const speed = Math.hypot(projectile.vx, projectile.vy);
+    const speed = Math.sqrt(projectile.vx * projectile.vx + projectile.vy * projectile.vy);
     if (!speed) return;
     const maxSpeed = (projectile.initialSpeed || speed) * projectile.maxSpeedMultiplier;
     if (speed >= maxSpeed) return;
@@ -1176,6 +1266,18 @@ export class GameSimulation {
     const scale = nextSpeed / speed;
     projectile.vx *= scale;
     projectile.vy *= scale;
+  }
+
+  applyBrittleCrit(projectile, enemy) {
+    if (projectile.isCritical) return;
+    const bonus = getAilmentCritChanceBonus(enemy);
+    if (bonus <= 0) return;
+    if (this.rng.next() >= bonus) return;
+    const owner = this.players.get(projectile.ownerId);
+    const critDamage = owner?.stats?.critDamage ?? 1;
+    if (critDamage <= 1) return;
+    projectile.damage *= critDamage;
+    projectile.isCritical = true;
   }
 
   applyProjectileStatuses(projectile, enemy) {
@@ -1192,6 +1294,8 @@ export class GameSimulation {
 
   updateEnemyStatusDamage(enemy, dt) {
     if (enemy.markedFor > 0) enemy.markedFor = Math.max(0, enemy.markedFor - dt);
+    updateAilments(this, enemy, dt);
+    if (!this.enemies.has(enemy.id)) return;
     if (!(enemy.burnFor > 0) || !(enemy.burnDps > 0)) return;
     enemy.burnFor = Math.max(0, enemy.burnFor - dt);
     this.damageEnemy(enemy, enemy.burnDps * dt, {
@@ -1202,6 +1306,7 @@ export class GameSimulation {
       vy: 0,
       allowSubUnitDamage: true,
       ignoreArmor: true,
+      fromAilment: true,
     });
   }
 
@@ -1294,7 +1399,7 @@ export class GameSimulation {
     const direction = normalize(target.x - firstEnemy.x, target.y - firstEnemy.y);
     projectile.x = firstEnemy.x + direction.x * (firstEnemy.radius + projectile.radius + 2);
     projectile.y = firstEnemy.y + direction.y * (firstEnemy.radius + projectile.radius + 2);
-    const speed = Math.hypot(projectile.vx, projectile.vy) || 1;
+    const speed = Math.sqrt(projectile.vx * projectile.vx + projectile.vy * projectile.vy) || 1;
     projectile.vx = direction.x * speed;
     projectile.vy = direction.y * speed;
     projectile.damage *= projectile.ricochetDamageMultiplier;
@@ -1331,6 +1436,64 @@ export class GameSimulation {
       }
     }
     return nearest;
+  }
+
+  triggerContagionBurst(enemy, owner, source) {
+    if (!owner || !(owner.stats.virulence2 > 0)) return;
+    if (source && (source.contagionDepth ?? 0) >= 1) return;
+    const poison = enemy.ailments?.poison;
+    const stacks = poison?.stacks;
+    if (!Array.isArray(stacks) || stacks.length < 4) return;
+    let dpsSum = 0;
+    for (const s of stacks) dpsSum += s?.dotPerSecond ?? 0;
+    if (dpsSum <= 0) return;
+    const burstDamage = dpsSum * 0.6;
+    const radius = 70;
+    const radiusSq = radius * radius;
+    if (!this.headless) {
+      const effectId = this.entityId();
+      this.effects.set(effectId, createEffect(effectId, "volatileBurst", enemy.x, enemy.y, radius, 0.32));
+    }
+    for (const other of this.enemies.values()) {
+      if (other.id === enemy.id || other.hp <= 0) continue;
+      if (distanceSq(enemy.x, enemy.y, other.x, other.y) > radiusSq) continue;
+      this.damageEnemy(other, burstDamage, {
+        ownerId: owner.id,
+        x: enemy.x,
+        y: enemy.y,
+        vx: other.x - enemy.x,
+        vy: other.y - enemy.y,
+        damageType: "chaos",
+        damageBreakdown: { chaos: burstDamage },
+        fromAilment: false,
+        contagionDepth: 1,
+      });
+    }
+  }
+
+  firePlagueLance(player, aimDirection = null) {
+    const direction = normalize(aimDirection?.x ?? player.facingX, aimDirection?.y ?? player.facingY);
+    const baseDamage = 32;
+    const breakdown = { physical: 12, chaos: 20 };
+    const projectile = createProjectile(
+      this.entityId(),
+      player.id,
+      player.x + direction.x * 26,
+      player.y + direction.y * 26,
+      direction.x * 520,
+      direction.y * 520,
+      baseDamage,
+      Math.max(4, player.stats.projectileRadius),
+      Math.max(player.stats.projectileTtl, 1.6),
+      {
+        pierce: 3,
+        color: "#9ef27a",
+        glowColor: "rgba(176, 107, 255, 0.55)",
+        damageType: "chaos",
+        damageBreakdown: breakdown,
+      },
+    );
+    this.projectiles.set(projectile.id, projectile);
   }
 
   triggerKillVolley(enemy, owner) {
@@ -1499,7 +1662,10 @@ export class GameSimulation {
   }
 
   currentDifficulty() {
-    this.difficulty = difficultyAt(this.elapsed);
+    if (this._difficultyCacheElapsed !== this.elapsed || !this.difficulty) {
+      this.difficulty = difficultyAt(this.elapsed);
+      this._difficultyCacheElapsed = this.elapsed;
+    }
     return this.difficulty;
   }
 

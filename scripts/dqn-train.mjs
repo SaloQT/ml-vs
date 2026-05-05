@@ -27,7 +27,7 @@ console.log(
 
 const startedAt = performance.now();
 for (let i = 0; i < iterations; i += 1) {
-  const point = trainer.trainBatch(batchSize);
+  const point = await trainer.trainBatch(batchSize);
   if (logEvery > 0 && (i % logEvery === 0 || i === iterations - 1)) {
     console.log(
       `[${point.iteration}] reward=${point.reward} score=${point.score} kills=${point.kills} ` +

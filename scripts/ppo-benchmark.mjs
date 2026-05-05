@@ -8,7 +8,7 @@ const evalSeeds = (options.evalSeeds ?? options["eval-seeds"] ?? "501,502,503,50
   .map((seed) => Number.parseInt(seed, 10))
   .filter(Number.isFinite);
 
-const trainer = new PpoTrainer();
+const trainer = new PpoTrainer({ useOrt: false });
 const evalBefore = evaluatePolicy(trainer, evalSeeds);
 const startedAt = performance.now();
 const history = [];
@@ -52,7 +52,7 @@ console.log(
 );
 
 function deterministicCheck(iterationsToRun, episodesPerBatch, expectedHistory, expectedWeights) {
-  const checkTrainer = new PpoTrainer();
+  const checkTrainer = new PpoTrainer({ useOrt: false });
   const checkHistory = [];
   for (let i = 0; i < iterationsToRun; i += 1) {
     checkHistory.push(checkTrainer.trainBatch(episodesPerBatch));

@@ -1,0 +1,22 @@
+# ONNXRuntime forward-only benchmark (forward MLP, F=18 -> H=64 ReLU -> A=9)
+ort version: 1.25.1
+backends: [{"name":"cpu","bundled":true},{"name":"webgpu","bundled":true},{"name":"cuda","bundled":false},{"name":"tensorrt","bundled":false}]
+## Provider initialization
+cpu EP: ok
+cuda EP: FAIL: /onnxruntime_src/onnxruntime/core/providers/cuda/cuda_call.cc:134 std::conditional_t<THRW, void, onnxruntime::common::Status> onnxruntime::CudaCall(ERRTYPE, const char*, const char*, SUCCTYPE, const char*, const char*, int) [with ERRTYPE = cudaError; bool THRW = true; SUCCTYPE = cudaError; std::conditional_t<THRW, void, common::Status> = void] /onnxruntime_src/onnxruntime/core/providers/cuda/cuda_call.cc:126 std::conditional_t<THRW, void, onnxruntime::common::Status> onnxruntime::CudaCall(ERRTYPE, const char*, const char*, SUCCTYPE, const char*, const char*, int) [with ERRTYPE = cudaError; bool THRW = true; SUCCTYPE = cudaError; std::conditional_t<THRW, void, common::Status> = void] CUDA failure 100: no CUDA-capable device is detected ; GPU=-1 ; hostname=codebox ; file=/onnxruntime_src/onnxruntime/core/providers/cuda/cuda_execution_provider.cc ; line=336 ; expr=cudaSetDevice(info_.device_id); 
+webgpu EP: ok
+# Correctness: max abs diff JS forward vs ORT-CPU = 1.490e-8
+# Correctness: max abs diff JS forward vs ORT-WebGPU = 1.118e-8
+## Forward-only latency (ms median of 100, post-warmup)
+| B | JS-CPU ms | JS-CPU samp/s | ORT-CPU ms | ORT-CPU samp/s | ORT-CUDA ms | ORT-CUDA samp/s | ORT-WGPU ms | ORT-WGPU samp/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 16 | 0.047 | 336863 | 0.037 | 436741 | n/a | n/a | 0.964 | 16596 |
+| 32 | 0.095 | 336488 | 0.032 | 1011730 | n/a | n/a | 0.988 | 32376 |
+| 64 | 0.189 | 339337 | 0.034 | 1878044 | n/a | n/a | 1.097 | 58335 |
+| 128 | 0.379 | 337338 | 0.042 | 3058396 | n/a | n/a | 1.186 | 107903 |
+| 256 | 0.772 | 331477 | 0.059 | 4308024 | n/a | n/a | 1.437 | 178197 |
+| 512 | 1.516 | 337836 | 0.065 | 7855773 | n/a | n/a | 1.490 | 343631 |
+| 1024 | 3.083 | 332118 | 0.131 | 7792109 | n/a | n/a | 1.699 | 602663 |
+| 2048 | 6.234 | 328532 | 0.146 | 13996337 | n/a | n/a | 2.193 | 933724 |
+| 4096 | 12.479 | 328232 | 0.209 | 19583469 | n/a | n/a | 2.970 | 1379306 |
+| 8192 | 24.984 | 327890 | 0.220 | 37236194 | n/a | n/a | 4.881 | 1678342 |

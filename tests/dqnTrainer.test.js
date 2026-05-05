@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 
 import { DqnTrainer } from "../src/dqnTrainer.js";
 
-test("DQN smoke: trainBatch produces finite metrics over 2 iterations", () => {
+test("DQN smoke: trainBatch produces finite metrics over 2 iterations", async () => {
   const trainer = new DqnTrainer();
   trainer.maxEpisodeSeconds = 4;
   trainer.warmupSeconds = 0;
   trainer.replayMinSize = 16;
   trainer.minibatchSize = 16;
 
-  const first = trainer.trainBatch(2);
-  const second = trainer.trainBatch(2);
+  const first = await trainer.trainBatch(2);
+  const second = await trainer.trainBatch(2);
 
   for (const point of [first, second]) {
     assert.equal(Number.isFinite(point.reward), true);

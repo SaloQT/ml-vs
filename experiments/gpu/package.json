@@ -1,0 +1,14 @@
+{
+  "name": "ml-vs-gpu-experiment",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Exploratory CPU vs GPU (CUDA) microbenchmarks for the RL trainers. Not used by main project.",
+  "scripts": {
+    "bench:cpu": "node cpu_bench.mjs > cpu_results.json",
+    "build:gpu": "nvcc -O3 -arch=sm_75 gpu_bench.cu -o gpu_bench && nvcc -O3 -arch=sm_75 verify.cu -o verify",
+    "bench:gpu": "./gpu_bench > gpu_results.json",
+    "verify": "./verify && node verify.mjs",
+    "report": "node report.mjs"
+  }
+}

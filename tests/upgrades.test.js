@@ -104,3 +104,29 @@ test("impact shielding damages collision attackers only when shield absorbs dama
   assert.equal(player.hp, player.stats.maxHp);
   assert.ok(player.shield < 60);
 });
+
+test("Plague Lance fires a chaos-breakdown projectile", () => {
+  const simulation = new GameSimulation({ seed: 7 });
+  const player = resetArena(simulation);
+  upgrade("plague-lance").apply(player);
+  player.cooldown = 999;
+  player.plagueLanceCooldown = 0;
+  simulation.inputs.set(player.id, { moveX: 0, moveY: 0, aimX: 1, aimY: 0 });
+  simulation.updatePlayers(0.016);
+  const projs = [...simulation.projectiles.values()];
+  assert.equal(projs.length, 1);
+  assert.equal(projs[0].damageType, "chaos");
+  assert.deepEqual(projs[0].damageBreakdown, { physical: 12, chaos: 20 });
+  assert.equal(projs[0].pierce, 3);
+});
+
+test("Virulence chain requires its prerequisite", () => {
+  const v1 = upgrade("virulence-1");
+  const v2 = upgrade("virulence-2");
+  const v3 = upgrade("virulence-3");
+  const lance = upgrade("plague-lance");
+  assert.equal(v1.requires, "plague-lance");
+  assert.equal(v2.requires, "virulence-1");
+  assert.equal(v3.requires, "virulence-2");
+  assert.equal(lance.requires, undefined);
+});

@@ -3,6 +3,8 @@
   "scripts": {
     "serve": "node scripts/dev-server.mjs",
     "test": "node --test",
+    "test:browser": "node --test --test-concurrency=1 tests/browser/index.browser.mjs tests/browser/benchmark.browser.mjs tests/browser/ort.browser.mjs",
+    "test:all": "npm test && npm run test:browser",
     "balance:economy": "node scripts/economy-balance.mjs",
     "benchmark:ppo": "node scripts/ppo-benchmark.mjs",
     "ppo:benchmark": "node scripts/ppo-benchmark.mjs",
@@ -11,5 +13,12 @@
     "a2c:train": "node scripts/a2c-train.mjs",
     "dqn:train": "node scripts/dqn-train.mjs",
     "benchmark:all": "node scripts/benchmark-all.mjs"
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.25.1",
+    "onnxruntime-web": "^1.25.1"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.42.0"
   }
 }

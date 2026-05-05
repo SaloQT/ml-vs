@@ -1,13 +1,17 @@
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { PpoTrainer } from "../src/ppoTrainer.js";
+import { PpoNodeWorkerPool, defaultWorkerCount, recommendSplit } from "../src/ppoNodeWorkerPool.js";
 
 const options = parseArgs(process.argv.slice(2));
 const iterations = positiveInt(options.iterations, 200);
-const batchSize = positiveInt(options.batchSize ?? options["batch-size"], 4);
+const batchSize = positiveInt(options.batchSize ?? options["batch-size"], 256);
 const outputPath = options.out ?? options.output ?? "ppo-model.json";
 const resumePath = options.resume ?? options.load;
 const logEvery = positiveInt(options.logEvery ?? options["log-every"], 10);
 const saveEvery = positiveInt(options.saveEvery ?? options["save-every"], 0);
+const requestedWorkers = options.workers !== undefined ? positiveInt(options.workers, defaultWorkerCount()) : defaultWorkerCount();
+const useWorkers = String(options.workers ?? "auto").toLowerCase() !== "0" && requestedWorkers > 1;
+const split = useWorkers ? recommendSplit(batchSize, requestedWorkers) : { W: 1, M: batchSize };
 
 const trainer = new PpoTrainer();
 applyHyperparams(trainer, options);
@@ -20,14 +24,17 @@ if (resumePath) {
   console.log(`resumed from ${resumePath} at iteration ${trainer.iteration}`);
 }
 
+const pool = useWorkers ? new PpoNodeWorkerPool({ workerCount: split.W }) : null;
+
 console.log(
   `training: iterations=${iterations} batchSize=${batchSize} out=${outputPath}` +
+    ` workers=${pool ? split.W : 1} envsPerWorker=${pool ? split.M : batchSize}` +
     (saveEvery ? ` saveEvery=${saveEvery}` : ""),
 );
 
 const startedAt = performance.now();
 for (let i = 0; i < iterations; i += 1) {
-  const point = trainer.trainBatch(batchSize);
+  const point = pool ? await pool.trainBatch(trainer, batchSize) : await trainer.trainBatch(batchSize);
   if (logEvery > 0 && (i % logEvery === 0 || i === iterations - 1)) {
     console.log(
       `[${point.iteration}] reward=${point.reward} score=${point.score} kills=${point.kills} ` +
@@ -41,6 +48,7 @@ for (let i = 0; i < iterations; i += 1) {
 const elapsedSeconds = (performance.now() - startedAt) / 1000;
 
 saveModel(trainer, outputPath);
+if (pool) pool.terminate();
 console.log(`done in ${elapsedSeconds.toFixed(1)}s — saved to ${outputPath}`);
 
 function saveModel(trainer, path) {

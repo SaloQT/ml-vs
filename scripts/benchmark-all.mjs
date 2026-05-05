@@ -27,7 +27,7 @@ for (const algo of ALGOS) {
   const startedAt = performance.now();
   let last = null;
   for (let i = 0; i < iterations; i += 1) {
-    last = trainer.trainBatch(batchSize);
+    last = await trainer.trainBatch(batchSize);
     if (logEvery > 0 && (i % logEvery === 0 || i === iterations - 1)) {
       console.log(
         `${algo.color}[${algo.name.padEnd(9)}]${RESET} iter=${String(last.iteration).padStart(3)} ` +

@@ -164,12 +164,41 @@ export const UPGRADE_POOL = [
   statUpgrade("last-stand-grid", "Last-Stand Grid", "epic", "Once per run, dropping below 35% hull grants a 45-point shield.", 1, (player) => {
     player.stats.emergencyShield += 45;
   }),
+  statUpgrade("plague-lance", "Plague Lance", "rare", "Equip a slow chaos-tipped lance that pierces 3 enemies and reliably poisons.", 1, (player) => {
+    player.stats.plagueLanceLevel += 1;
+  }),
+  requiresUpgrade(
+    statUpgrade("virulence-1", "Virulence I — Festering Wounds", "rare", "Your poisons deal 50% more damage over time.", 1, (player) => {
+      player.stats.virulence1 = 1;
+    }),
+    "plague-lance",
+  ),
+  requiresUpgrade(
+    statUpgrade("virulence-2", "Virulence II — Contagion", "epic", "Enemies dying with 4+ poison stacks erupt in a chaos burst that re-poisons neighbours.", 1, (player) => {
+      player.stats.virulence2 = 1;
+    }),
+    "virulence-1",
+  ),
+  requiresUpgrade(
+    statUpgrade("virulence-3", "Virulence III — Pandemic", "epic", "Your poison stack cap rises from 8 to 12.", 1, (player) => {
+      player.stats.virulence3 = 1;
+    }),
+    "virulence-2",
+  ),
 ];
 
+function requiresUpgrade(upgrade, requiredId) {
+  upgrade.requires = requiredId;
+  return upgrade;
+}
+
 export function pickUpgradeChoices(rng, player, count = 3) {
+  const owned = player.ownedUpgrades ?? new Set();
   const candidates = UPGRADE_POOL.filter((upgrade) => {
     const stacks = player.upgradeStacks?.get(upgrade.id) ?? 0;
-    return stacks < upgrade.maxStacks;
+    if (stacks >= upgrade.maxStacks) return false;
+    if (upgrade.requires && !owned.has(upgrade.requires)) return false;
+    return true;
   });
   const choices = [];
   while (choices.length < count && candidates.length) {

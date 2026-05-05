@@ -1,3 +1,4 @@
+import { getActiveAilmentDisplay, truncateAilmentDisplay } from "./ailments.js";
 import { GAME } from "./config.js";
 import {
   ENEMY_SHEET,
@@ -398,6 +399,57 @@ export class Renderer {
     const barWidth = enemy.rank === "boss" ? enemy.radius * 2.7 : enemy.radius * 2;
     const barHeight = enemy.rank === "boss" ? 5 : 3;
     ctx.fillRect(enemy.x - barWidth / 2, enemy.y + bob - enemy.radius - 10, barWidth * health, barHeight);
+    this.drawAilmentPips(enemy, bob);
+  }
+
+  drawAilmentPips(enemy, bob) {
+    const all = getActiveAilmentDisplay(enemy);
+    if (!all.length) return;
+    const { visible, overflow } = truncateAilmentDisplay(all, 5);
+    const ctx = this.ctx;
+    const pipW = 7;
+    const pipH = 5;
+    const gap = 2;
+    const pad = 2;
+    const overflowW = overflow > 0 ? 12 : 0;
+    const pipsWidth = visible.length * pipW + Math.max(0, visible.length - 1) * gap;
+    const totalWidth = pipsWidth + (overflow > 0 ? gap + overflowW : 0);
+    const startX = Math.round(enemy.x - totalWidth / 2);
+    const y = Math.round(enemy.y + bob - enemy.radius - 16);
+    ctx.save();
+    // Background pill for contrast against busy sprites/HP bar.
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(startX - pad, y - pad, totalWidth + pad * 2, pipH + 2 + pad * 2);
+    for (let i = 0; i < visible.length; i += 1) {
+      const e = visible[i];
+      const x = startX + i * (pipW + gap);
+      // Control ailments get a slightly taller, brighter pip with a white
+      // outline so freeze/shock/chill read at a glance.
+      const tall = e.isControl ? 1 : 0;
+      const yy = y - tall;
+      const hh = pipH + tall;
+      ctx.fillStyle = e.color;
+      ctx.fillRect(x, yy, pipW, hh);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = e.isControl ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.6)";
+      ctx.strokeRect(x + 0.5, yy + 0.5, pipW - 1, hh - 1);
+      if (e.showStackCount) {
+        ctx.fillStyle = "#0a1410";
+        ctx.font = "bold 6px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(e.stacks > 9 ? "9+" : String(e.stacks), x + pipW / 2, yy + hh / 2 + 0.5);
+      }
+    }
+    if (overflow > 0) {
+      const x = startX + pipsWidth + gap;
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.font = "bold 8px sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(`+${overflow}`, x, y - 1);
+    }
+    ctx.restore();
   }
 
   drawEliteAura(enemy, bob, elapsed) {

@@ -14,3 +14,6 @@ ppo-model.json
 
 netlify-drop/
 netlify-drop.zip
+
+# Local Netlify folder
+.netlify

@@ -11,9 +11,12 @@ const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
+  [".mjs", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
+  [".onnx", "application/octet-stream"],
   [".png", "image/png"],
   [".svg", "image/svg+xml"],
+  [".wasm", "application/wasm"],
   [".webp", "image/webp"],
 ]);
 
@@ -26,6 +29,10 @@ createServer((request, response) => {
   response.setHeader("Pragma", "no-cache");
   response.setHeader("Expires", "0");
   response.setHeader("Surrogate-Control", "no-store");
+  // Cross-origin isolation: enables SharedArrayBuffer + multi-threaded WASM.
+  response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  response.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
 
   if (!filePath.startsWith(root + sep) && filePath !== root) {
     response.writeHead(403);
