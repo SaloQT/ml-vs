@@ -138,6 +138,7 @@ export class A2cTrainer {
       entropy: Number((stats?.entropy ?? 0).toFixed(6)),
     };
     this.history.push(point);
+    if (this.history.length > 5000) this.history.splice(0, this.history.length - 5000);
     return point;
   }
 
@@ -420,7 +421,9 @@ export class A2cTrainer {
         const indicator = a === action ? 1 : 0;
         const pgGrad = (indicator - probabilities[a]) * advantage;
         const p = probabilities[a];
-        const entGrad = p > 1e-12 ? -p * (Math.log(p) + ent) : 0;
+        let entGrad = p > 1e-12 ? -p * (Math.log(p) + ent) : 0;
+        // Clamp entropy gradient to keep -p*log(p) finite as p -> 0.
+        if (entGrad < -5) entGrad = -5; else if (entGrad > 5) entGrad = 5;
         const gradient = pgGrad + entropyCoef * entGrad;
         const scale = learningRate * gradient;
         const row = weights[a];

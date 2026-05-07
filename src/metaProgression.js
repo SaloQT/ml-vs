@@ -264,6 +264,55 @@ const OLD_LINEAR_EFFECT = {
   "field-medicine": (lvl) => lvl * 0.025,
 };
 
+// Per-version migration chain. Each entry is keyed by the `from` version and
+// produces the next version. To add a v2->v3 migration, append { from: 2, to: 3, run }.
+const MIGRATIONS = [
+  {
+    from: 1,
+    to: 2,
+    run(state) {
+      let refund = 0;
+      for (const upgrade of PERMANENT_UPGRADES) {
+        const level = state.upgrades?.[upgrade.id] ?? 0;
+        if (level <= 0) continue;
+        const oldFn = OLD_LINEAR_EFFECT[upgrade.id];
+        if (!oldFn) continue;
+        const oldEffect = oldFn(level);
+        const newEffect = newEffectMagnitude(upgrade, level);
+        if (newEffect < oldEffect) {
+          for (let r = 1; r <= level; r += 1) {
+            const oldDelta = oldFn(r) - oldFn(r - 1);
+            const newDelta = newEffectMagnitude(upgrade, r) - newEffectMagnitude(upgrade, r - 1);
+            if (newDelta < oldDelta) {
+              refund += upgradeCost(upgrade, r - 1);
+            }
+          }
+        }
+      }
+      if (refund > 0) {
+        state.scrap = (state.scrap ?? 0) + refund;
+        // eslint-disable-next-line no-console
+        console.log(`[meta] migration v2 refund: +${refund} scrap`);
+      }
+      return state;
+    },
+  },
+];
+
+function runMigrations(state, fromVersion) {
+  let current = fromVersion;
+  let working = state;
+  while (current < CURRENT_MIGRATION_VERSION) {
+    const step = MIGRATIONS.find((m) => m.from === current);
+    if (!step) break;
+    working = step.run(working) ?? working;
+    current = step.to;
+    working.migrationVersion = current;
+  }
+  working.migrationVersion = Math.max(working.migrationVersion ?? current, current);
+  return working;
+}
+
 function newEffectMagnitude(upgrade, level) {
   if (typeof upgrade.logScale === "number") {
     return logEffect(level, upgrade.logScale);
@@ -287,6 +336,11 @@ export function normalizeMetaProgress(raw = {}) {
     },
     equipment: Object.fromEntries(
       Object.entries(defaults.equipment).map(([slot, defaultId]) => {
+        const isExistingSave = source.equipment && typeof source.equipment === "object";
+        if (isExistingSave && !(slot in rawEquipment)) {
+          // eslint-disable-next-line no-console
+          console.log(`[meta] migration: equipment slot "${slot}" missing from save; defaulting to "${defaultId}"`);
+        }
         const selectedId = rawEquipment[slot] ?? defaultId;
         const isKnown = EQUIPMENT[slot]?.some((item) => item.id === selectedId);
         return [slot, isKnown ? selectedId : defaultId];
@@ -298,33 +352,11 @@ export function normalizeMetaProgress(raw = {}) {
     },
   };
 
-  if (source.migrationVersion !== CURRENT_MIGRATION_VERSION) {
-    let refund = 0;
-    for (const upgrade of PERMANENT_UPGRADES) {
-      const level = normalized.upgrades[upgrade.id] ?? 0;
-      if (level <= 0) continue;
-      const oldFn = OLD_LINEAR_EFFECT[upgrade.id];
-      if (!oldFn) continue;
-      const oldEffect = oldFn(level);
-      const newEffect = newEffectMagnitude(upgrade, level);
-      if (newEffect < oldEffect) {
-        // Refund roughly proportional to the lost effect: scan ranks where the
-        // per-rank delta has shrunk and credit the cost of those ranks.
-        for (let r = 1; r <= level; r += 1) {
-          const oldDelta = oldFn(r) - oldFn(r - 1);
-          const newDelta = newEffectMagnitude(upgrade, r) - newEffectMagnitude(upgrade, r - 1);
-          if (newDelta < oldDelta) {
-            refund += upgradeCost(upgrade, r - 1);
-          }
-        }
-      }
-    }
-    if (refund > 0) {
-      normalized.scrap = (normalized.scrap ?? 0) + refund;
-      // eslint-disable-next-line no-console
-      console.log(`[meta] migration v2 refund: +${refund} scrap`);
-    }
-    normalized.migrationVersion = CURRENT_MIGRATION_VERSION;
+  const startVersion = Number.isFinite(source.migrationVersion) ? source.migrationVersion : 1;
+  if (startVersion < CURRENT_MIGRATION_VERSION) {
+    runMigrations(normalized, startVersion);
+  } else {
+    normalized.migrationVersion = startVersion;
   }
 
   return normalized;

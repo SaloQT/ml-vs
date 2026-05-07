@@ -164,12 +164,104 @@ export const UPGRADE_POOL = [
   statUpgrade("last-stand-grid", "Last-Stand Grid", "epic", "Once per run, dropping below 35% hull grants a 45-point shield.", 1, (player) => {
     player.stats.emergencyShield += 45;
   }),
+  statUpgrade("plague-lance", "Plague Lance", "rare", "Equip a slow chaos-tipped lance that pierces 3 enemies and reliably poisons.", 1, (player) => {
+    player.stats.plagueLanceLevel += 1;
+  }),
+  requiresUpgrade(
+    statUpgrade("virulence-1", "Virulence I — Festering Wounds", "rare", "Your poisons deal 50% more damage over time.", 1, (player) => {
+      player.stats.virulence1 = 1;
+    }),
+    "plague-lance",
+  ),
+  requiresUpgrade(
+    statUpgrade("virulence-2", "Virulence II — Contagion", "epic", "Enemies dying with 4+ poison stacks erupt in a chaos burst that re-poisons neighbours.", 1, (player) => {
+      player.stats.virulence2 = 1;
+    }),
+    "virulence-1",
+  ),
+  requiresUpgrade(
+    statUpgrade("virulence-3", "Virulence III — Pandemic", "epic", "Your poison stack cap rises from 8 to 12.", 1, (player) => {
+      player.stats.virulence3 = 1;
+    }),
+    "virulence-2",
+  ),
+  statUpgrade("pyre-brand", "Pyre Brand", "rare", "Equip a heavy fire brand that pierces 2 enemies and reliably ignites and scorches.", 1, (player) => {
+    player.stats.pyreBrandLevel += 1;
+  }),
+  requiresUpgrade(
+    statUpgrade("conflagration-1", "Conflagration I — Cinderbloom", "rare", "Your ignites deal 40% more damage over time.", 1, (player) => {
+      player.stats.conflagration1 = 1;
+    }),
+    "pyre-brand",
+  ),
+  requiresUpgrade(
+    statUpgrade("conflagration-2", "Conflagration II — Wildfire", "epic", "Ignited enemies that die erupt in a fire burst that ignites neighbours.", 1, (player) => {
+      player.stats.conflagration2 = 1;
+    }),
+    "conflagration-1",
+  ),
+  requiresUpgrade(
+    statUpgrade("conflagration-3", "Conflagration III — Pyroclasm", "epic", "Your fire hits inflict deeper scorch (+25% fire damage taken bonus).", 1, (player) => {
+      player.stats.conflagration3 = 1;
+    }),
+    "conflagration-2",
+  ),
+  statUpgrade("rime-lance", "Rime Lance", "rare", "Equip a slow cold lance that pierces 2 enemies and reliably chills/freezes.", 1, (player) => {
+    player.stats.rimeLanceLevel += 1;
+  }),
+  requiresUpgrade(
+    statUpgrade("glaciation-1", "Glaciation I — Permafrost", "rare", "Rime Lance hits deal 35% more damage to chilled, frozen, or brittle enemies.", 1, (player) => {
+      player.stats.glaciation1 = 1;
+    }),
+    "rime-lance",
+  ),
+  requiresUpgrade(
+    statUpgrade("glaciation-2", "Glaciation II — Shatterpoint", "epic", "Rime Lance hits on frozen or brittle enemies erupt in a cold shatter burst.", 1, (player) => {
+      player.stats.glaciation2 = 1;
+    }),
+    "glaciation-1",
+  ),
+  requiresUpgrade(
+    statUpgrade("glaciation-3", "Glaciation III — Cryoclasm", "epic", "Critical Rime Lance hits double the shatter burst and extend brittle by 0.10 magnitude.", 1, (player) => {
+      player.stats.glaciation3 = 1;
+    }),
+    "glaciation-2",
+  ),
+  statUpgrade("tempest-coil", "Tempest Coil", "rare", "Equip a slow lightning coil that pierces 3 enemies and arcs to nearby foes, shocking and sapping them.", 1, (player) => {
+    player.stats.tempestCoilLevel += 1;
+  }),
+  requiresUpgrade(
+    statUpgrade("overcharge-1", "Overcharge I — Static Buildup", "rare", "Tempest Coil arcs +2 more times and each arc hits 15% harder.", 1, (player) => {
+      player.stats.overcharge1 = 1;
+    }),
+    "tempest-coil",
+  ),
+  requiresUpgrade(
+    statUpgrade("overcharge-2", "Overcharge II — Conductive Surge", "epic", "Tempest Coil hits apply much stronger shock and sap to the primary target.", 1, (player) => {
+      player.stats.overcharge2 = 1;
+    }),
+    "overcharge-1",
+  ),
+  requiresUpgrade(
+    statUpgrade("overcharge-3", "Overcharge III — Static Discharge", "epic", "When a shocked enemy you killed dies, it releases a single lightning burst that damages nearby foes.", 1, (player) => {
+      player.stats.overcharge3 = 1;
+    }),
+    "overcharge-2",
+  ),
 ];
 
+function requiresUpgrade(upgrade, requiredId) {
+  upgrade.requires = requiredId;
+  return upgrade;
+}
+
 export function pickUpgradeChoices(rng, player, count = 3) {
+  const owned = player.ownedUpgrades ?? new Set();
   const candidates = UPGRADE_POOL.filter((upgrade) => {
     const stacks = player.upgradeStacks?.get(upgrade.id) ?? 0;
-    return stacks < upgrade.maxStacks;
+    if (stacks >= upgrade.maxStacks) return false;
+    if (upgrade.requires && !owned.has(upgrade.requires)) return false;
+    return true;
   });
   const choices = [];
   while (choices.length < count && candidates.length) {

@@ -29,8 +29,8 @@ export function mergeTargetingConfig(current, overrides = {}) {
 
 export function selectTarget(actor, enemies, weaponTargeting, rng) {
   const targeting = normalizeWeaponTargeting(weaponTargeting);
-  const enemyTypes = targeting.enemyTypes;
-  const hasTypeFilter = enemyTypes.length > 0;
+  const enemyTypeSet = targeting._enemyTypeSet;
+  const hasTypeFilter = enemyTypeSet !== null;
   const maxRangeSq = targeting.maxRange > 0 ? targeting.maxRange * targeting.maxRange : Infinity;
   const ax = actor.x;
   const ay = actor.y;
@@ -43,7 +43,7 @@ export function selectTarget(actor, enemies, weaponTargeting, rng) {
     for (let i = 0; i < enemies.length; i += 1) {
       const enemy = enemies[i];
       if (enemy.hp <= 0) continue;
-      if (hasTypeFilter && enemyTypes.indexOf(enemy.type) < 0) continue;
+      if (hasTypeFilter && !enemyTypeSet.has(enemy.type)) continue;
       const dx = enemy.x - ax;
       const dy = enemy.y - ay;
       const d = dx * dx + dy * dy;
@@ -61,7 +61,7 @@ export function selectTarget(actor, enemies, weaponTargeting, rng) {
     for (let i = 0; i < enemies.length; i += 1) {
       const enemy = enemies[i];
       if (enemy.hp <= 0) continue;
-      if (hasTypeFilter && enemyTypes.indexOf(enemy.type) < 0) continue;
+      if (hasTypeFilter && !enemyTypeSet.has(enemy.type)) continue;
       const dx = enemy.x - ax;
       const dy = enemy.y - ay;
       if (dx * dx + dy * dy > maxRangeSq) continue;
@@ -76,7 +76,7 @@ export function selectTarget(actor, enemies, weaponTargeting, rng) {
   for (let i = 0; i < enemies.length; i += 1) {
     const enemy = enemies[i];
     if (enemy.hp <= 0) continue;
-    if (hasTypeFilter && enemyTypes.indexOf(enemy.type) < 0) continue;
+    if (hasTypeFilter && !enemyTypeSet.has(enemy.type)) continue;
     const dx = enemy.x - ax;
     const dy = enemy.y - ay;
     if (dx * dx + dy * dy > maxRangeSq) continue;
@@ -93,9 +93,13 @@ function normalizeWeaponTargeting(targeting) {
   const strategy = Object.values(TARGET_STRATEGIES).includes(targeting.strategy)
     ? targeting.strategy
     : TARGET_STRATEGIES.nearest;
+  const enemyTypes = Array.isArray(targeting.enemyTypes) ? [...targeting.enemyTypes] : [];
   return {
     strategy,
-    enemyTypes: Array.isArray(targeting.enemyTypes) ? [...targeting.enemyTypes] : [],
+    enemyTypes,
+    // Set form for O(1) membership checks in the hot loop. The array is kept
+    // for serialization/equality compatibility.
+    _enemyTypeSet: enemyTypes.length > 0 ? new Set(enemyTypes) : null,
     maxRange: Number.isFinite(targeting.maxRange) ? Math.max(0, targeting.maxRange) : 0,
     firingAngleDegrees: Number.isFinite(targeting.firingAngleDegrees)
       ? Math.max(0, Math.min(180, targeting.firingAngleDegrees))
