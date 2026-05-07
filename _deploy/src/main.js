@@ -151,7 +151,10 @@ if (typeof window !== "undefined") {
       const h = trainer.history ?? [];
       const last = h.at(-1) ?? null;
       out[key] = {
-        iterations: h.length,
+        // True iteration count — h.length is bounded by the rolling history
+        // cap, so it freezes once the cap is reached even though training
+        // continues. Use the last point's iteration field instead.
+        iterations: last?.iteration ?? 0,
         ticksPerSecond: last?.ticksPerSecond ?? null,
         elapsedMs: last?.elapsedMs ?? null,
         ticksLast: last?.ticks ?? null,
@@ -192,6 +195,7 @@ const damageMeter = {
 let ppoGraphAverageWindow = Number.parseInt(ppoAverageWindowInput?.value ?? "8", 10) || 8;
 
 function startPlayerRun() {
+  input.reset();
   simulation = createSimulation();
   accumulator = 0;
   lastTime = performance.now();
@@ -679,6 +683,7 @@ function loadVisualOptions() {
   };
   try {
     const stored = JSON.parse(localStorage.getItem("space-survivors-options") ?? "{}");
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return defaults;
     return {
       ...defaults,
       ...Object.fromEntries(Object.entries(stored).filter(([, value]) => typeof value === "boolean")),
@@ -689,11 +694,27 @@ function loadVisualOptions() {
 }
 
 function loadMetaProgress() {
+  let parsed;
   try {
-    return normalizeMetaProgress(JSON.parse(localStorage.getItem(META_STORAGE_KEY) ?? "{}"));
+    parsed = JSON.parse(localStorage.getItem(META_STORAGE_KEY) ?? "{}");
   } catch {
     return normalizeMetaProgress();
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return normalizeMetaProgress();
+  }
+  const normalized = normalizeMetaProgress(parsed);
+  if (!Number.isFinite(normalized.scrap)) normalized.scrap = 0;
+  if (normalized.upgrades && typeof normalized.upgrades === "object") {
+    for (const key of Object.keys(normalized.upgrades)) {
+      if (!Number.isFinite(normalized.upgrades[key])) normalized.upgrades[key] = 0;
+    }
+  }
+  if (normalized.best && typeof normalized.best === "object") {
+    if (!Number.isFinite(normalized.best.seconds)) normalized.best.seconds = 0;
+    if (!Number.isFinite(normalized.best.wave)) normalized.best.wave = 1;
+  }
+  return normalized;
 }
 
 function saveMetaProgress() {
@@ -1054,7 +1075,7 @@ function renderArmoryHeader(featuredUpgrade) {
   `;
   header.querySelector("#armory-launch").addEventListener("click", () => {
     closePanel(armoryPanel, openArmory);
-    startRun.click();
+    startPlayerRun();
   });
   return header;
 }
@@ -1489,7 +1510,7 @@ function renderArmoryEmptyState() {
   `;
   banner.querySelector("#armory-launch-first").addEventListener("click", () => {
     closePanel(armoryPanel, openArmory);
-    startRun.click();
+    startPlayerRun();
   });
   return banner;
 }
