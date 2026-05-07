@@ -44,9 +44,14 @@ export class PpoWorkerPool {
     const id = this.nextJobId;
     this.nextJobId += 1;
     return new Promise((resolve, reject) => {
+      let timeoutHandle = null;
       const cleanup = () => {
         worker.removeEventListener("message", onMessage);
         worker.removeEventListener("error", onError);
+        if (timeoutHandle !== null) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
       };
       const onMessage = (event) => {
         const message = event.data ?? {};
@@ -61,6 +66,11 @@ export class PpoWorkerPool {
       };
       worker.addEventListener("message", onMessage);
       worker.addEventListener("error", onError);
+      // Default 60s deadline so a hung worker does not stall the trainer forever.
+      timeoutHandle = setTimeout(() => {
+        cleanup();
+        reject(new Error(`PPO worker job ${id} timed out after 60s.`));
+      }, 60000);
       worker.postMessage({ id, type: "runEpisodes", trainingState, seeds });
     });
   }

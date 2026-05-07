@@ -96,9 +96,18 @@ export class DqnTrainer {
     this.enemySpawnMultiplier = 1;
     this.filterDeathEpisodes = false;
     // Replay state (ephemeral, never serialized)
+    // Ring buffers: arrays preallocated up to capacity; .length grows until full,
+    // then .head wraps modulo capacity. .count tracks valid entries (== length while
+    // partially filled, == capacity once full). Avoids O(n) shift() on overflow.
     this._replay = []; // movement transitions
+    this._replay._head = 0;
+    this._replay._count = 0;
     this._replayAim = [];
+    this._replayAim._head = 0;
+    this._replayAim._count = 0;
     this._replayUpgrade = [];
+    this._replayUpgrade._head = 0;
+    this._replayUpgrade._count = 0;
     this._totalSteps = 0;
     this._updateCount = 0;
     this._hScratch = new Array(HIDDEN);
@@ -106,11 +115,27 @@ export class DqnTrainer {
     this._aimQ = new Array(AIM_TURN_DELTAS.length);
   }
 
+  // Canonical epsilon-greedy decision shared by sequential + vectorized rollouts.
+  // Always draws `seeded(seed)` first; on the random branch draws once more from
+  // `seeded(seed * 2654435761 + 1)`. Vectorized path must use the same seed and
+  // draw counts so action selection is reproducible across rollout modes.
+  _selectEpsilonGreedy(qs, qOff, actionCount, epsilon, seed) {
+    if (seeded(seed) < epsilon) {
+      return Math.floor(seeded(seed * 2654435761 + 1) * actionCount) % actionCount;
+    }
+    let bestA = 0;
+    let bestQ = qs[qOff];
+    for (let a = 1; a < actionCount; a += 1) {
+      const v = qs[qOff + a];
+      if (v > bestQ) { bestQ = v; bestA = a; }
+    }
+    return bestA;
+  }
+
   _epsilonGreedyFast(features, hidden, weights, bias, qOut, actionCount, epsilon, seed) {
-    const r = seeded(seed);
-    if (r < epsilon) {
-      const r2 = seeded(seed * 2654435761 + 1);
-      return Math.floor(r2 * actionCount) % actionCount;
+    // Skip the network if we're going to act randomly anyway.
+    if (seeded(seed) < epsilon) {
+      return Math.floor(seeded(seed * 2654435761 + 1) * actionCount) % actionCount;
     }
     forwardFastJs(hidden, weights, bias, features, this._hScratch, qOut);
     let bestAction = 0;
@@ -252,27 +277,12 @@ export class DqnTrainer {
         const env = envs[n];
         const player = env.sim.players.get(env.playerId);
         const features = liveFeatures[s];
-        // Epsilon-greedy: same RNG scheme as sequential path.
+        // Epsilon-greedy: identical seeds (env.seed + tick*11 / + tick*37 + 17)
+        // and RNG draws as the sequential path; see _selectEpsilonGreedy.
         const moveSeed = env.seed + tick * 11;
         const aimSeed = env.seed + tick * 37 + 17;
-        let moveAction;
-        if (seeded(moveSeed) < epsilon) {
-          moveAction = Math.floor(seeded(moveSeed * 2654435761 + 1) * moveActionCount) % moveActionCount;
-        } else {
-          const off = s * moveActionCount;
-          let bestA = 0; let bestQ = moveQ[off];
-          for (let a = 1; a < moveActionCount; a += 1) if (moveQ[off + a] > bestQ) { bestQ = moveQ[off + a]; bestA = a; }
-          moveAction = bestA;
-        }
-        let aimAction;
-        if (seeded(aimSeed) < epsilon) {
-          aimAction = Math.floor(seeded(aimSeed * 2654435761 + 1) * aimActionCount) % aimActionCount;
-        } else {
-          const off = s * aimActionCount;
-          let bestA = 0; let bestQ = aimQ[off];
-          for (let a = 1; a < aimActionCount; a += 1) if (aimQ[off + a] > bestQ) { bestQ = aimQ[off + a]; bestA = a; }
-          aimAction = bestA;
-        }
+        const moveAction = this._selectEpsilonGreedy(moveQ, s * moveActionCount, moveActionCount, epsilon, moveSeed);
+        const aimAction = this._selectEpsilonGreedy(aimQ, s * aimActionCount, aimActionCount, epsilon, aimSeed);
         const aim = rotateAim(player.aimX ?? player.facingX ?? 1, player.aimY ?? player.facingY ?? 0, AIM_TURN_DELTAS[aimAction] ?? 0);
         const input = { moveX: ACTIONS[moveAction][0], moveY: ACTIONS[moveAction][1], aimX: aim.x, aimY: aim.y };
         env.sim.applyInput(env.playerId, input);
@@ -431,16 +441,23 @@ export class DqnTrainer {
   }
 
   _pushReplay(buffer, transition) {
-    if (buffer.length >= this.replayCapacity) {
-      buffer.shift();
+    const cap = this.replayCapacity;
+    if (buffer._count < cap) {
+      // Still filling.
+      buffer.push(transition);
+      buffer._count += 1;
+      buffer._head = buffer._count % cap;
+    } else {
+      // Full ring: overwrite at head and advance.
+      buffer[buffer._head] = transition;
+      buffer._head = (buffer._head + 1) % cap;
     }
-    buffer.push(transition);
   }
 
   _learnFromReplay() {
     let totalLoss = 0;
     let count = 0;
-    if (this._replay.length >= this.replayMinSize) {
+    if (this._replay._count >= this.replayMinSize) {
       totalLoss += this._updateQ(
         this._replay,
         this.moveHidden, this.qWeights, this.qWeightsBias,
@@ -455,7 +472,7 @@ export class DqnTrainer {
         this.targetWeightsBias = [...this.qWeightsBias];
       }
     }
-    if (this._replayAim.length >= this.replayMinSize) {
+    if (this._replayAim._count >= this.replayMinSize) {
       totalLoss += this._updateQ(
         this._replayAim,
         this.aimHidden, this.qAimWeights, this.qAimWeightsBias,
@@ -469,7 +486,7 @@ export class DqnTrainer {
         this.targetAimWeightsBias = [...this.qAimWeightsBias];
       }
     }
-    if (this._replayUpgrade.length >= Math.min(16, this.replayMinSize)) {
+    if (this._replayUpgrade._count >= Math.min(16, this.replayMinSize)) {
       totalLoss += this._updateUpgradeQ(this._replayUpgrade);
       count += 1;
       if (this._updateCount % this.targetSyncEvery === 0) {
@@ -500,7 +517,7 @@ export class DqnTrainer {
     let count = 0;
     const okOrt = await this._ensureOrtSessions();
     if (!okOrt) return this._learnFromReplay(); // graceful fallback
-    if (this._replay.length >= this.replayMinSize) {
+    if (this._replay._count >= this.replayMinSize) {
       totalLoss += await this._updateQOrt(
         this._ortMove,
         this._replay,
@@ -516,7 +533,7 @@ export class DqnTrainer {
         this.targetWeightsBias = [...this.qWeightsBias];
       }
     }
-    if (this._replayAim.length >= this.replayMinSize) {
+    if (this._replayAim._count >= this.replayMinSize) {
       totalLoss += await this._updateQOrt(
         this._ortAim,
         this._replayAim,
@@ -532,7 +549,7 @@ export class DqnTrainer {
       }
     }
     // Upgrade head: small linear, JS path
-    if (this._replayUpgrade.length >= Math.min(16, this.replayMinSize)) {
+    if (this._replayUpgrade._count >= Math.min(16, this.replayMinSize)) {
       totalLoss += this._updateUpgradeQ(this._replayUpgrade);
       count += 1;
       if (this._updateCount % this.targetSyncEvery === 0) {
@@ -543,12 +560,13 @@ export class DqnTrainer {
   }
 
   async _updateQOrt(session, buffer, hidden, weights, bias, tHidden, tWeights, tBias, actionCount, saltA) {
-    const B = Math.min(this.minibatchSize, buffer.length);
+    const validCount = buffer._count ?? buffer.length;
+    const B = Math.min(this.minibatchSize, validCount);
     if (B === 0) return 0;
     const F = FEATURE_COUNT;
     const indices = new Array(B);
     for (let i = 0; i < B; i += 1) {
-      indices[i] = Math.floor(seeded(this._totalSteps * saltA + i * 31 + this.iteration * 13) * buffer.length) % buffer.length;
+      indices[i] = Math.floor(seeded(this._totalSteps * saltA + i * 31 + this.iteration * 13) * validCount) % validCount;
     }
     // Build X (current features), Xn (next features), and a mask for terminal/no-next.
     const X = new Float32Array(B * F);
@@ -570,6 +588,9 @@ export class DqnTrainer {
     }
     // Forward online net on X, target net on Xn (using a temp pseudo-session view by feeding target weights).
     const fwd = await session.forwardBatch(X, B, hidden, weights, bias);
+    // Target net forward: tHidden/tWeights/tBias are independent cloned arrays
+    // (see cloneHidden / cloneWeights at sync points) so no autograd path connects
+    // them to the online net. Do not fuse these into the online tensors.
     const fwdT = await session.forwardBatch(Xn, B, tHidden, tWeights, tBias);
     const Logits = fwd.Logits;
     const Tlog = fwdT.Logits;
@@ -597,15 +618,16 @@ export class DqnTrainer {
   }
 
   _updateQ(buffer, hidden, weights, bias, tHidden, tWeights, tBias, actionCount, saltA) {
-    const sampleCount = Math.min(this.minibatchSize, buffer.length);
+    const validCount = buffer._count ?? buffer.length;
+    const sampleCount = Math.min(this.minibatchSize, validCount);
     let lossSum = 0;
     const lr = this.learningRate;
     // Sample indices first so we have a clear minibatch (≥256 by default).
     const indices = new Array(sampleCount);
     for (let i = 0; i < sampleCount; i += 1) {
       indices[i] = Math.floor(
-        seeded(this._totalSteps * saltA + i * 31 + this.iteration * 13) * buffer.length,
-      ) % buffer.length;
+        seeded(this._totalSteps * saltA + i * 31 + this.iteration * 13) * validCount,
+      ) % validCount;
     }
     for (let i = 0; i < sampleCount; i += 1) {
       const tr = buffer[indices[i]];
@@ -617,6 +639,8 @@ export class DqnTrainer {
       // Target Q(s', .)
       let maxNext = 0;
       if (!tr.done && tr.nextFeatures) {
+        // Target net forward: tHidden/tWeights/tBias are independent cloned arrays
+        // so no gradients flow back to the online net. Do not fuse with online tensors.
         const tH = hiddenForward(tHidden, tr.nextFeatures);
         const tQ = outputForward(tWeights, tH, tBias);
         let m = -Infinity;
@@ -635,11 +659,12 @@ export class DqnTrainer {
   }
 
   _updateUpgradeQ(buffer) {
-    const sampleCount = Math.min(this.minibatchSize, buffer.length);
+    const validCount = buffer._count ?? buffer.length;
+    const sampleCount = Math.min(this.minibatchSize, validCount);
     let lossSum = 0;
     const lr = this.learningRate;
     for (let i = 0; i < sampleCount; i += 1) {
-      const idx = Math.floor(seeded(this._totalSteps * 6151 + i * 41 + this.iteration * 17) * buffer.length) % buffer.length;
+      const idx = Math.floor(seeded(this._totalSteps * 6151 + i * 41 + this.iteration * 17) * validCount) % validCount;
       const tr = buffer[idx];
       const action = tr.action;
       const choiceFeatures = tr.choiceFeatures ?? [];

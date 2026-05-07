@@ -752,7 +752,10 @@ export class PpoTrainer {
         const probs = new Float32Array(actionCount);
         for (let a = 0; a < actionCount; a += 1) { const e = Math.exp(Logits[off + a] - mx); probs[a] = e; total += e; }
         for (let a = 0; a < actionCount; a += 1) probs[a] /= total;
-        const ratio = probs[step.action] / Math.max(step.probability, 0.0001);
+        // Use log-prob form to avoid blow-up when prob_old is tiny.
+        let logRatio = Math.log(Math.max(probs[step.action], 1e-8)) - Math.log(Math.max(step.probability, 1e-8));
+        if (logRatio < -5) logRatio = -5; else if (logRatio > 5) logRatio = 5;
+        const ratio = Math.exp(logRatio);
         const clippedRatio = ratio < lowClip ? lowClip : ratio > highClip ? highClip : ratio;
         const rawAdv = (step.return - averageReturn) / returnDeviation;
         const adv = rawAdv < -advantageClamp ? -advantageClamp : rawAdv > advantageClamp ? advantageClamp : rawAdv;
@@ -802,7 +805,10 @@ export class PpoTrainer {
         const probs = new Array(actionCount);
         for (let i = 0; i < actionCount; i += 1) { const e = Math.exp(logits[i] - mx); probs[i] = e; total += e; }
         for (let i = 0; i < actionCount; i += 1) probs[i] /= total;
-        const ratio = probs[action] / Math.max(step.probability, 0.0001);
+        // Use log-prob form to avoid blow-up when prob_old is tiny.
+        let logRatio = Math.log(Math.max(probs[action], 1e-8)) - Math.log(Math.max(step.probability, 1e-8));
+        if (logRatio < -5) logRatio = -5; else if (logRatio > 5) logRatio = 5;
+        const ratio = Math.exp(logRatio);
         const clippedRatio = ratio < lowClip ? lowClip : ratio > highClip ? highClip : ratio;
         const rawAdvantage = (step.return - averageReturn) / returnDeviation;
         const advantage =
@@ -840,7 +846,10 @@ export class PpoTrainer {
       const step = steps[s];
       const action = step.action;
       const probabilities = this.upgradeProbabilities(step.features);
-      const ratio = probabilities[action] / Math.max(step.probability, 0.0001);
+      // Use log-prob form to avoid blow-up when prob_old is tiny.
+      let logRatio = Math.log(Math.max(probabilities[action], 1e-8)) - Math.log(Math.max(step.probability, 1e-8));
+      if (logRatio < -5) logRatio = -5; else if (logRatio > 5) logRatio = 5;
+      const ratio = Math.exp(logRatio);
       const clippedRatio = ratio < lowClip ? lowClip : ratio > highClip ? highClip : ratio;
       const rawAdvantage = (step.return - averageReturn) / returnDeviation;
       const advantage =

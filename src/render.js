@@ -43,6 +43,7 @@ export class Renderer {
     this.seenEffects = new Set();
     this.shake = 0;
     this.cameraInitialized = false;
+    this._statBarGradients = new Map();
     this.hudState = {
       hpDisplay: 1,
       xpDisplay: 0,
@@ -56,7 +57,15 @@ export class Renderer {
       gameOverIn: 0,
     };
     this.resize();
-    window.addEventListener("resize", () => this.resize());
+    this._onResize = () => this.resize();
+    window.addEventListener("resize", this._onResize);
+  }
+
+  destroy() {
+    if (this._onResize) {
+      window.removeEventListener("resize", this._onResize);
+      this._onResize = null;
+    }
   }
 
   resize() {
@@ -69,6 +78,7 @@ export class Renderer {
     this.ctx.imageSmoothingQuality = "high";
     this.viewport = { width: rect.width, height: rect.height, dpr };
     this.camera.scale = Math.min(rect.width / GAME.width, rect.height / GAME.height) * GAME.cameraZoom;
+    if (this._statBarGradients) this._statBarGradients.clear();
   }
 
   screenToWorld(clientX, clientY) {
@@ -658,9 +668,13 @@ export class Renderer {
       ctx.fillStyle = "rgba(124, 136, 255, 0.55)";
       ctx.strokeStyle = "rgba(255, 255, 255, 0.34)";
       ctx.lineWidth = 1;
+      // Hoist save/restore out of the loop; accumulate rotation in place
+      // and undo it after the loop so we don't re-save canvas state per plate.
+      let prevAngle = 0;
       for (let i = 0; i < 4; i += 1) {
-        ctx.save();
-        ctx.rotate((Math.PI / 2) * i + Math.sin(elapsed * 1.8 + numericId(enemy.id)) * 0.04);
+        const angle = (Math.PI / 2) * i + Math.sin(elapsed * 1.8 + numericId(enemy.id)) * 0.04;
+        ctx.rotate(angle - prevAngle);
+        prevAngle = angle;
         ctx.beginPath();
         ctx.moveTo(enemy.radius * 0.35, -enemy.radius * 0.24);
         ctx.lineTo(enemy.radius + plateOffset, -enemy.radius * 0.36);
@@ -669,8 +683,8 @@ export class Renderer {
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
-        ctx.restore();
       }
+      ctx.rotate(-prevAngle);
     } else if (enemy.bossId === "nova-spitter") {
       const burst = bossTelegraphProgress(enemy, "burst", elapsed, 1);
       const orbitRadius = enemy.radius * (0.7 - burst * 0.45);
@@ -1049,7 +1063,6 @@ export class Renderer {
       destroyed,
       size,
     });
-    this.damageNumbers = this.damageNumbers.slice(-120);
     this.damageSamples.push({ time: elapsed, damage });
     this.pruneDamageSamples(elapsed);
   }
@@ -1074,6 +1087,13 @@ export class Renderer {
       }
     }
     arr.length = w;
+    // Cap to most recent 120 by shifting tail in place (no allocations).
+    const cap = 120;
+    if (w > cap) {
+      const drop = w - cap;
+      for (let i = 0; i < cap; i += 1) arr[i] = arr[i + drop];
+      arr.length = cap;
+    }
   }
 
   drawDamageNumbers() {
@@ -1100,7 +1120,16 @@ export class Renderer {
 
   pruneDamageSamples(elapsed) {
     const oldest = elapsed - this.dpsWindow;
-    this.damageSamples = this.damageSamples.filter((sample) => sample.time >= oldest);
+    const arr = this.damageSamples;
+    let w = 0;
+    for (let i = 0; i < arr.length; i += 1) {
+      const sample = arr[i];
+      if (sample.time >= oldest) {
+        if (w !== i) arr[w] = sample;
+        w += 1;
+      }
+    }
+    arr.length = w;
   }
 
   currentDps(elapsed) {
@@ -1516,32 +1545,25 @@ export class Renderer {
     const chipY = xpY + (xpH - chipH) / 2;
     this.drawHexChip(chipX, chipY, chipW, chipH, "#ffc857", `LV ${player.level}`, hs.levelFlash);
 
-    // EXPERIENCE label + value — bottom-right
+    // EXPERIENCE + SCRAP labels and values — bottom-right.
+    // Merged into a single save/restore so each distinct font value is set
+    // only once across both blocks.
+    const scrapVal = Math.floor(player.scrap ?? 0);
+    const scrapRightX = vw - pad - 130;
     ctx.save();
+    ctx.textAlign = "right";
     ctx.font = "900 9px Inter, system-ui, sans-serif";
     ctx.fillStyle = "rgba(255, 230, 160, 0.7)";
-    ctx.textAlign = "right";
     ctx.fillText("EXPERIENCE", vw - pad, xpY - 8);
-    ctx.font = "900 14px Inter, system-ui, sans-serif";
-    ctx.fillStyle = "#ffeed1";
-    ctx.shadowColor = "rgba(255, 210, 74, 0.7)";
-    ctx.shadowBlur = 8;
-    ctx.fillText(`${Math.floor(player.xp)} / ${player.nextLevelXp}`, vw - pad, xpY + xpH + 16);
-    ctx.shadowBlur = 0;
-    ctx.restore();
-
-    // In-run scrap counter — left of EXPERIENCE
-    ctx.save();
-    const scrapVal = Math.floor(player.scrap ?? 0);
-    ctx.font = "900 9px Inter, system-ui, sans-serif";
     ctx.fillStyle = "rgba(255, 200, 87, 0.7)";
-    ctx.textAlign = "right";
-    const scrapRightX = vw - pad - 130;
     ctx.fillText("SCRAP", scrapRightX, xpY - 8);
     ctx.font = "900 14px Inter, system-ui, sans-serif";
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = "#ffeed1";
+    ctx.shadowColor = "rgba(255, 210, 74, 0.7)";
+    ctx.fillText(`${Math.floor(player.xp)} / ${player.nextLevelXp}`, vw - pad, xpY + xpH + 16);
     ctx.fillStyle = "#ffd9a3";
     ctx.shadowColor = "rgba(255, 176, 32, 0.6)";
-    ctx.shadowBlur = 8;
     ctx.fillText(`⬢ ${scrapVal}`, scrapRightX, xpY + xpH + 16);
     ctx.shadowBlur = 0;
     ctx.restore();
@@ -1759,19 +1781,31 @@ export class Renderer {
       ctx.restore();
     }
 
-    // Gradient fill
+    // Gradient fill — cached by (y, height, color/gradient stops). Vertical
+    // gradients only depend on y/height, not x, so we can reuse across frames.
     if (fillW > 1) {
       let fillStyle = color;
+      const cache = this._statBarGradients;
       if (opts.gradient) {
-        const g = ctx.createLinearGradient(x, y, x, y + height);
-        g.addColorStop(0, opts.gradient[0]);
-        g.addColorStop(0.5, opts.gradient[1]);
-        g.addColorStop(1, opts.gradient[2]);
+        const key = `f3|${y}|${height}|${opts.gradient[0]}|${opts.gradient[1]}|${opts.gradient[2]}`;
+        let g = cache.get(key);
+        if (!g) {
+          g = ctx.createLinearGradient(x, y, x, y + height);
+          g.addColorStop(0, opts.gradient[0]);
+          g.addColorStop(0.5, opts.gradient[1]);
+          g.addColorStop(1, opts.gradient[2]);
+          cache.set(key, g);
+        }
         fillStyle = g;
       } else {
-        const g = ctx.createLinearGradient(x, y, x, y + height);
-        g.addColorStop(0, lighten(color, 0.35));
-        g.addColorStop(1, color);
+        const key = `f2|${y}|${height}|${color}`;
+        let g = cache.get(key);
+        if (!g) {
+          g = ctx.createLinearGradient(x, y, x, y + height);
+          g.addColorStop(0, lighten(color, 0.35));
+          g.addColorStop(1, color);
+          cache.set(key, g);
+        }
         fillStyle = g;
       }
       ctx.fillStyle = fillStyle;
@@ -1807,9 +1841,15 @@ export class Renderer {
       ctx.save();
       roundRectPath(ctx, x, y, width, height, r);
       ctx.clip();
-      const sg = ctx.createLinearGradient(x, y, x, y + height);
-      sg.addColorStop(0, hexToRgba(opts.shieldColor ?? "#7df3ff", 0.85));
-      sg.addColorStop(1, hexToRgba(opts.shieldColor ?? "#7df3ff", 0.55));
+      const shieldColor = opts.shieldColor ?? "#7df3ff";
+      const skey = `s|${y}|${height}|${shieldColor}`;
+      let sg = this._statBarGradients.get(skey);
+      if (!sg) {
+        sg = ctx.createLinearGradient(x, y, x, y + height);
+        sg.addColorStop(0, hexToRgba(shieldColor, 0.85));
+        sg.addColorStop(1, hexToRgba(shieldColor, 0.55));
+        this._statBarGradients.set(skey, sg);
+      }
       ctx.fillStyle = sg;
       ctx.fillRect(x + start, y, shieldW - start, height);
       // Diagonal shield hatching

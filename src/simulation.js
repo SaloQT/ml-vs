@@ -174,6 +174,17 @@ export class GameSimulation {
   // which is determinism-critical (lowest-numericId tie-breaks etc).
   // Deletion uses tombstones (enemy._removed = true); compaction is lazy.
   _addEnemy(enemy) {
+    if (enemy._numericId === undefined) {
+      const idStr = enemy.id;
+      let nid = 0;
+      if (typeof idStr === "string") {
+        for (let k = 0; k < idStr.length; k += 1) {
+          const c = idStr.charCodeAt(k);
+          if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
+        }
+      }
+      enemy._numericId = nid;
+    }
     this.enemies.set(enemy.id, enemy);
     this._enemyArr.push(enemy);
   }
@@ -208,6 +219,17 @@ export class GameSimulation {
       arr.length = 0;
       for (const e of this.enemies.values()) {
         e._removed = false;
+        if (e._numericId === undefined) {
+          const idStr = e.id;
+          let nid = 0;
+          if (typeof idStr === "string") {
+            for (let k = 0; k < idStr.length; k += 1) {
+              const c = idStr.charCodeAt(k);
+              if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
+            }
+          }
+          e._numericId = nid;
+        }
         arr.push(e);
       }
     }
@@ -653,32 +675,25 @@ export class GameSimulation {
       const siphonChance = this.wave >= 6 ? Math.min(0.025 + this.wave * 0.005, 0.09) : 0;
       const wardenChance = this.wave >= 8 ? Math.min(0.018 + this.wave * 0.004, 0.07) : 0;
       const bruiserChance = Math.min(0.1 + this.wave * 0.015, 0.35);
-      const type =
-        typeRoll < splitterChance
-          ? "splitter"
-          : typeRoll < splitterChance + stalkerChance
-            ? "stalker"
-            : typeRoll < splitterChance + stalkerChance + spitterChance
-              ? "spitter"
-              : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance
-                ? "bulwark"
-                : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance + chargerChance
-                  ? "charger"
-                  : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance + chargerChance + siphonChance
-                    ? "siphon"
-                    : typeRoll < splitterChance + stalkerChance + spitterChance + bulwarkChance + chargerChance + siphonChance + wardenChance
-                      ? "warden"
-                      : typeRoll <
-                            splitterChance +
-                              stalkerChance +
-                              spitterChance +
-                              bulwarkChance +
-                              chargerChance +
-                              siphonChance +
-                              wardenChance +
-                              bruiserChance
-                        ? "bruiser"
-                        : "drone";
+      const buckets = [
+        { type: "splitter", chance: splitterChance },
+        { type: "stalker", chance: stalkerChance },
+        { type: "spitter", chance: spitterChance },
+        { type: "bulwark", chance: bulwarkChance },
+        { type: "charger", chance: chargerChance },
+        { type: "siphon", chance: siphonChance },
+        { type: "warden", chance: wardenChance },
+        { type: "bruiser", chance: bruiserChance },
+      ];
+      let type = "drone";
+      let cumulative = 0;
+      for (let bi = 0; bi < buckets.length; bi += 1) {
+        cumulative += buckets[bi].chance;
+        if (typeRoll < cumulative) {
+          type = buckets[bi].type;
+          break;
+        }
+      }
       const affixes = this.rollEnemyAffixes();
       const enemy = createEnemy(
         this.entityId(),
@@ -793,7 +808,10 @@ export class GameSimulation {
     const affixes = [];
     while (affixes.length < count && pool.length) {
       const index = Math.floor(this.rng.next() * pool.length);
-      affixes.push(pool.splice(index, 1)[0]);
+      const sel = pool[index];
+      pool[index] = pool[pool.length - 1];
+      pool.pop();
+      affixes.push(sel);
     }
     return affixes;
   }
@@ -849,16 +867,6 @@ export class GameSimulation {
       if (enemy._hastedFlag === undefined) {
         enemy._hastedFlag =
           (enemy.affixes && enemy.affixes.indexOf("hasted") >= 0) || enemy.eliteAffix === "swift";
-        // enemy.id is "e<number>" — extract numeric tail without regex alloc.
-        const idStr = enemy.id;
-        let nid = 0;
-        if (typeof idStr === "string") {
-          for (let k = 0; k < idStr.length; k += 1) {
-            const c = idStr.charCodeAt(k);
-            if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
-          }
-        }
-        enemy._numericId = nid;
       }
       if (enemy.type === "charger") {
         enemy.chargeCooldown = Math.max(0, (enemy.chargeCooldown ?? 0) - dt);
@@ -940,7 +948,11 @@ export class GameSimulation {
               vy: enemy.y - target.y,
             });
           }
-          if (result.hullDamage > 0 && target.stats.hullDamageReflection > 0) {
+          if (
+            result.hullDamage > 0
+            && target.stats.hullDamageReflection > 0
+            && this.enemies.has(enemy.id)
+          ) {
             this.damageEnemy(enemy, result.hullDamage * target.stats.hullDamageReflection, {
               ownerId: target.id,
               x: target.x,
@@ -950,6 +962,7 @@ export class GameSimulation {
             });
           }
         }
+        if (!this.enemies.has(enemy.id)) continue;
         const ck = target.stats.contactKnockback ?? 0;
         const knockback = 20 + ck;
         enemy.x -= dirX * knockback;
@@ -1023,13 +1036,15 @@ export class GameSimulation {
     // Per-candidate exact collision (pr + enemy.radius) still gates impact.
     const PROJECTILE_QUERY_PAD = 50;
     const out = this._projectileCollisionScratch ?? (this._projectileCollisionScratch = []);
+    const toDelete = this._projectileDeleteScratch ?? (this._projectileDeleteScratch = []);
+    toDelete.length = 0;
     for (const projectile of this.projectiles.values()) {
       this.accelerateProjectile(projectile, dt);
       projectile.x += projectile.vx * dt;
       projectile.y += projectile.vy * dt;
       projectile.ttl -= dt;
       if (projectile.ttl <= 0) {
-        this.projectiles.delete(projectile.id);
+        toDelete.push(projectile.id);
         continue;
       }
 
@@ -1071,10 +1086,14 @@ export class GameSimulation {
         if (projectile.pierce > 0) {
           projectile.pierce -= 1;
         } else {
-          this.projectiles.delete(projectile.id);
+          toDelete.push(projectile.id);
         }
       }
     }
+    for (let i = 0; i < toDelete.length; i += 1) {
+      this.projectiles.delete(toDelete[i]);
+    }
+    toDelete.length = 0;
   }
 
   updateDrones(dt) {
@@ -1139,9 +1158,9 @@ export class GameSimulation {
         const player = entry.player;
         const magnetRadius = entry.magnetRadius;
         const magnetSq = entry.magnetSq;
-        const dx0 = player.x - pickup.x;
-        const dy0 = player.y - pickup.y;
-        const distSq = dx0 * dx0 + dy0 * dy0;
+        let dx0 = player.x - pickup.x;
+        let dy0 = player.y - pickup.y;
+        let distSq = dx0 * dx0 + dy0 * dy0;
         if (distSq < magnetSq) {
           const len = Math.sqrt(distSq);
           if (len) {
@@ -1149,12 +1168,14 @@ export class GameSimulation {
             const scale = (pull * dt) / len;
             pickup.x += dx0 * scale;
             pickup.y += dy0 * scale;
+            // Pickup moved; refresh delta for the collect-distance check.
+            dx0 = player.x - pickup.x;
+            dy0 = player.y - pickup.y;
+            distSq = dx0 * dx0 + dy0 * dy0;
           }
         }
         const collectDistance = entry.collectBase + pickup.radius;
-        const ndx = player.x - pickup.x;
-        const ndy = player.y - pickup.y;
-        if (ndx * ndx + ndy * ndy <= collectDistance * collectDistance) {
+        if (distSq <= collectDistance * collectDistance) {
           if (!toCollect) toCollect = [];
           toCollect.push({ pickup, player });
           break;
@@ -1335,20 +1356,6 @@ export class GameSimulation {
     const enemyArr = this._enemyArr;
     for (let ei = 0; ei < enemyArr.length; ei += 1) {
       const enemy = enemyArr[ei];
-      // Lazily compute the parsed numeric id once per enemy. Determinism-
-      // critical paths sort grid candidates by this value to mimic the
-      // ascending-insertion-order semantics of Map.values().
-      if (enemy._numericId === undefined) {
-        const idStr = enemy.id;
-        let nid = 0;
-        if (typeof idStr === "string") {
-          for (let k = 0; k < idStr.length; k += 1) {
-            const c = idStr.charCodeAt(k);
-            if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
-          }
-        }
-        enemy._numericId = nid;
-      }
       // Defensive: _resetEnemyGrid wiped buckets but enemy._gridKey may still
       // point at the old (now empty/pooled) bucket. Clear so _addEnemyToBucket
       // doesn't double-track.
@@ -1365,17 +1372,6 @@ export class GameSimulation {
   // the same step() see it. Called from spawnSplitChildren / spawnBossMinion.
   _addEnemyToGrid(enemy) {
     if (!this._gridBuckets) return;
-    if (enemy._numericId === undefined) {
-      const idStr = enemy.id;
-      let nid = 0;
-      if (typeof idStr === "string") {
-        for (let k = 0; k < idStr.length; k += 1) {
-          const c = idStr.charCodeAt(k);
-          if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
-        }
-      }
-      enemy._numericId = nid;
-    }
     const cx = ((enemy.x + 8192) | 0) >> 7;
     const cy = ((enemy.y + 8192) | 0) >> 7;
     const key = (cy << 8) | cx;
@@ -1448,17 +1444,6 @@ export class GameSimulation {
     const enemyArr = this._enemyArr;
     for (let ei = 0; ei < enemyArr.length; ei += 1) {
       const enemy = enemyArr[ei];
-      if (enemy._numericId === undefined) {
-        const idStr = enemy.id;
-        let nid = 0;
-        if (typeof idStr === "string") {
-          for (let k = 0; k < idStr.length; k += 1) {
-            const c = idStr.charCodeAt(k);
-            if (c >= 48 && c <= 57) nid = nid * 10 + (c - 48);
-          }
-        }
-        enemy._numericId = nid;
-      }
       const cx = ((enemy.x + 8192) | 0) >> 7;
       const cy = ((enemy.y + 8192) | 0) >> 7;
       const newKey = (cy << 8) | cx;

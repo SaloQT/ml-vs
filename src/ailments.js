@@ -1,3 +1,5 @@
+import { lerp } from "./math.js";
+
 // Damage type + ailment system.
 //
 // Damage types are derived from a Path of Exile-style model: physical is the
@@ -141,10 +143,6 @@ export function emptyAilmentState() {
 
 function clamp01(x) {
   return x < 0 ? 0 : x > 1 ? 1 : x;
-}
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
 }
 
 function computeRollStrength(name, cfg, hitDamage, enemyMaxHp, rank) {

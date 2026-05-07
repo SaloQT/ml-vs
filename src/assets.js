@@ -103,6 +103,9 @@ function loadImageSet(images) {
   return Object.fromEntries(
     Object.entries(images).map(([name, src]) => {
       const image = new Image();
+      image.onerror = () => {
+        console.warn("[assets] failed to load:", src);
+      };
       image.src = src;
       return [
         name,
@@ -123,6 +126,9 @@ export function loadUiSheet() {
 
 function loadSheet(sheet) {
   const image = new Image();
+  image.onerror = () => {
+    console.warn("[assets] failed to load:", sheet.src);
+  };
   image.src = sheet.src;
   return {
     image,

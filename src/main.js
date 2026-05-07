@@ -195,6 +195,7 @@ const damageMeter = {
 let ppoGraphAverageWindow = Number.parseInt(ppoAverageWindowInput?.value ?? "8", 10) || 8;
 
 function startPlayerRun() {
+  input.reset();
   simulation = createSimulation();
   accumulator = 0;
   lastTime = performance.now();
@@ -682,6 +683,7 @@ function loadVisualOptions() {
   };
   try {
     const stored = JSON.parse(localStorage.getItem("space-survivors-options") ?? "{}");
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return defaults;
     return {
       ...defaults,
       ...Object.fromEntries(Object.entries(stored).filter(([, value]) => typeof value === "boolean")),
@@ -692,11 +694,27 @@ function loadVisualOptions() {
 }
 
 function loadMetaProgress() {
+  let parsed;
   try {
-    return normalizeMetaProgress(JSON.parse(localStorage.getItem(META_STORAGE_KEY) ?? "{}"));
+    parsed = JSON.parse(localStorage.getItem(META_STORAGE_KEY) ?? "{}");
   } catch {
     return normalizeMetaProgress();
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return normalizeMetaProgress();
+  }
+  const normalized = normalizeMetaProgress(parsed);
+  if (!Number.isFinite(normalized.scrap)) normalized.scrap = 0;
+  if (normalized.upgrades && typeof normalized.upgrades === "object") {
+    for (const key of Object.keys(normalized.upgrades)) {
+      if (!Number.isFinite(normalized.upgrades[key])) normalized.upgrades[key] = 0;
+    }
+  }
+  if (normalized.best && typeof normalized.best === "object") {
+    if (!Number.isFinite(normalized.best.seconds)) normalized.best.seconds = 0;
+    if (!Number.isFinite(normalized.best.wave)) normalized.best.wave = 1;
+  }
+  return normalized;
 }
 
 function saveMetaProgress() {

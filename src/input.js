@@ -24,9 +24,52 @@ export class InputController {
     this.aimX = 1;
     this.aimY = 0;
     this.targetMode = "nearest";
-    window.addEventListener("keydown", (event) => this.keys.add(event.code));
-    window.addEventListener("keyup", (event) => this.keys.delete(event.code));
+    this._windowListeners = [];
+    this._touchTarget = null;
+    this._touchListeners = [];
+    this._onKeyDown = (event) => this.keys.add(event.code);
+    this._onKeyUp = (event) => this.keys.delete(event.code);
+    window.addEventListener("keydown", this._onKeyDown);
+    window.addEventListener("keyup", this._onKeyUp);
+    this._windowListeners.push(["keydown", this._onKeyDown], ["keyup", this._onKeyUp]);
     if (touchTarget) this.attachTouch(touchTarget);
+  }
+
+  reset() {
+    this.keys.clear();
+    this.touch = null;
+    this.touchVector = { x: 0, y: 0 };
+    this.pointer = null;
+    this.aimX = 1;
+    this.aimY = 0;
+  }
+
+  destroy() {
+    for (const [type, handler] of this._windowListeners) {
+      window.removeEventListener(type, handler);
+    }
+    this._windowListeners = [];
+    if (this._touchTarget) {
+      for (const [type, handler, options] of this._touchListeners) {
+        this._touchTarget.removeEventListener(type, handler, options);
+      }
+      this._touchListeners = [];
+      this._touchTarget = null;
+    }
+    if (this.joystickBase) {
+      this.joystickBase.remove();
+      this.joystickBase = null;
+    }
+    if (this.joystickThumb) {
+      this.joystickThumb.remove();
+      this.joystickThumb = null;
+    }
+    this.keys.clear();
+    this.touch = null;
+    this.touchVector = { x: 0, y: 0 };
+    this.pointer = null;
+    this.aimX = 0;
+    this.aimY = 0;
   }
 
   attachTouch(target) {
@@ -72,17 +115,29 @@ export class InputController {
       this.hideJoystick();
     };
 
-    target.addEventListener("touchstart", start, { passive: false });
-    target.addEventListener("touchmove", move, { passive: false });
-    target.addEventListener("touchend", end);
-    target.addEventListener("touchcancel", end);
-    target.addEventListener("pointermove", (event) => {
+    const onPointerMove = (event) => {
       if (event.pointerType === "touch") return;
       this.pointer = { clientX: event.clientX, clientY: event.clientY };
-    });
-    target.addEventListener("pointerleave", () => {
+    };
+    const onPointerLeave = () => {
       this.pointer = null;
-    });
+    };
+    const passiveOpts = { passive: false };
+    target.addEventListener("touchstart", start, passiveOpts);
+    target.addEventListener("touchmove", move, passiveOpts);
+    target.addEventListener("touchend", end);
+    target.addEventListener("touchcancel", end);
+    target.addEventListener("pointermove", onPointerMove);
+    target.addEventListener("pointerleave", onPointerLeave);
+    this._touchTarget = target;
+    this._touchListeners.push(
+      ["touchstart", start, passiveOpts],
+      ["touchmove", move, passiveOpts],
+      ["touchend", end, undefined],
+      ["touchcancel", end, undefined],
+      ["pointermove", onPointerMove, undefined],
+      ["pointerleave", onPointerLeave, undefined],
+    );
   }
 
   showJoystick(baseX, baseY, thumbX, thumbY) {
